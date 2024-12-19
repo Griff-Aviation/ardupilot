@@ -50,6 +50,7 @@
 #include <AP_VisualOdom/AP_VisualOdom.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
+#include <AP_Battery/AP_Battery_MAV.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include <AP_Scripting/AP_Scripting.h>
 #include <SRV_Channel/SRV_Channel.h>
@@ -4500,6 +4501,17 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         AP_EFI *efi = AP::EFI();
         if (efi) {
             efi->handle_EFI_message(msg);
+        }
+        break;
+    }
+#endif
+
+#if AP_BATTERY_MAV_ENABLED
+    case MAVLINK_MSG_ID_BATTERY_STATUS:
+    {
+        AP_Battery_MAV *batt = AP::Battery_MAV();
+        if (batt){
+            batt->handle_BATTERY_message(msg);
         }
         break;
     }
