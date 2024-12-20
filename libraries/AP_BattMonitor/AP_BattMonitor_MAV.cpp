@@ -18,21 +18,20 @@
 
 #include "AP_BattMonitor_MAV.h"
 #include <AP_Battery/AP_Battery_MAV.h>
+#include <GCS_MAVLink/GCS.h>
 
 void AP_BattMonitor_MAV::read()
 {
-    AP_Battery_MAV *batt = AP::Battery_MAV();
-    if (batt == nullptr) {
-        return;
-    }
+            
     uint8_t instance = _params._serial_number;
     if (instance > MAX_BATTERIES){
         return;
     }
 
     struct BatteryState batt_state;
-    batt->get_state(batt_state,instance);
+    AP::Battery_MAV().get_state(batt_state,instance);
 
+    gcs().send_text(MAV_SEVERITY_CRITICAL, "Battery Voltage: %5.3f", batt_state.voltage);
     _state.voltage = batt_state.voltage;
     _state.current_amps = batt_state.current;
     _state.consumed_mah = batt_state.consumed_mah;
