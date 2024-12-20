@@ -16,17 +16,26 @@
 #pragma once
 
 #include <GCS_MAVLink/GCS_MAVLink.h>
-#include "AP_BattMonitor_config.h"
+#include <AP_BattMonitor/AP_BattMonitor_config.h>
 
 #if AP_BATTERY_MAV_ENABLED
+
+#define MAX_BATTERIES 9
+
+struct BatteryState {
+    float voltage;     // in Volts
+    float current;     // in Amperes
+    float consumed_mah; // in mAh
+};
 
 class AP_Battery_MAV
 {
 public:
-    AP_Battery_MAV();
+    AP_Battery_MAV(const AP_Battery_MAV&) = delete;
 
-    static AP_Battery_MAV *get_singleton(void){
-        return singelton;
+    static AP_Battery_MAV& get_singleton(void){
+        static AP_Battery_MAV singleton;
+        return singleton;
     }
 
     void get_state(BatteryState &_state,uint8_t inst);
@@ -34,13 +43,7 @@ public:
     void handle_BATTERY_message(const mavlink_message_t &msg);
 
 private:
-    static AP_Battery_MAV *singleton;
-
-    struct BatteryState {
-        float voltage;     // in Volts
-        float current;     // in Amperes
-        float consumed_mah; // in mAh
-    };
+    AP_Battery_MAV();
 
     BatteryState _batteries[MAX_BATTERIES];
     bool _received_new_data[MAX_BATTERIES] = {false};
@@ -51,7 +54,7 @@ private:
 };
 
 namespace AP {
-    AP_Battery_MAV *Battery_MAV();
+    AP_Battery_MAV& Battery_MAV();
 };
 
 #endif

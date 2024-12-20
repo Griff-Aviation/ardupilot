@@ -4509,10 +4509,8 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
 #if AP_BATTERY_MAV_ENABLED
     case MAVLINK_MSG_ID_BATTERY_STATUS:
     {
-        AP_Battery_MAV *batt = AP::Battery_MAV();
-        if (batt){
-            batt->handle_BATTERY_message(msg);
-        }
+        gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink Battery status recived");
+        AP::Battery_MAV().handle_BATTERY_message(msg);
         break;
     }
 #endif
