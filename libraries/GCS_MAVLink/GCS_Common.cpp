@@ -51,6 +51,7 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Battery/AP_Battery_MAV.h>
+#include <AP_ESC_Telem/AP_ESC_Telem_MAV.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include <AP_Scripting/AP_Scripting.h>
 #include <SRV_Channel/SRV_Channel.h>
@@ -4509,11 +4510,25 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
 #if AP_BATTERY_MAV_ENABLED
     case MAVLINK_MSG_ID_BATTERY_STATUS:
     {
-        gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink Battery status recived");
+        //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink Battery status recived");
         AP::Battery_MAV().handle_BATTERY_message(msg);
         break;
     }
 #endif
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_1_TO_4:
+    {
+        //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink ESC status 1-4 recived");
+        AP::ESC_Telem_MAV().handle_ESC_message(msg,0);
+        break;
+    }
+
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_5_TO_8:
+    {
+        //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink ESC status 5-8 recived");
+        AP::ESC_Telem_MAV().handle_ESC_message(msg,1);
+        break;
+    }
+
     }
 
 }

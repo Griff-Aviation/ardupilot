@@ -36,11 +36,15 @@ public:
         return true;
     }
 
-    bool has_consumed_energy(void) const override {
+    bool has_temperature(void) const override {
         return true;
     }
 
+    /// capacity_remaining_pct - returns true if the percentage is valid and writes to percentage argument
+    bool capacity_remaining_pct(uint8_t &percentage) const override;
+
 private:
+    uint8_t _soc = 0;
 };
 
 #endif // AP_BATTERY_MAV_ENABLED

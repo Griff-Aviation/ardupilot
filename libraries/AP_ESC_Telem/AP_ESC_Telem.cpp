@@ -411,6 +411,7 @@ void AP_ESC_Telem::send_esc_telemetry_mavlink(uint8_t mav_chan)
         // we've never had any data
         return;
     }
+    //gcs().send_text(MAV_SEVERITY_CRITICAL, "ESC status %d", ESC_TELEM_MAX_ESCS);
 
     const uint32_t now = AP_HAL::millis();
     const uint32_t now_us = AP_HAL::micros();
