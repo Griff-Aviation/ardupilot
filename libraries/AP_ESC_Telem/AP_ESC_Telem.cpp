@@ -402,6 +402,7 @@ void AP_ESC_Telem::send_esc_telemetry_mavlink(uint8_t mav_chan)
         // we've never had any data
         return;
     }
+    //gcs().send_text(MAV_SEVERITY_CRITICAL, "ESC status %d", ESC_TELEM_MAX_ESCS);
 
     // loop through groups of 4 ESCs
     const uint8_t esc_offset = constrain_int16(mavlink_offset, 0, ESC_TELEM_MAX_ESCS-1);

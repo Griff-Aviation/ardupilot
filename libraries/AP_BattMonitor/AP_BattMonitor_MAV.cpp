@@ -20,6 +20,28 @@
 #include <AP_Battery/AP_Battery_MAV.h>
 #include <GCS_MAVLink/GCS.h>
 
+uint8_t foo = 0;
+
+/// capacity_remaining_pct - returns true if the percentage is valid and writes to percentage argument
+bool AP_BattMonitor_MAV::capacity_remaining_pct(uint8_t &percentage) const
+{
+    /*
+    if (foo == 0){
+        gcs().send_text(MAV_SEVERITY_CRITICAL, "Battery soc: %d", _soc);
+        foo = 10;
+    }
+    foo--;
+    */
+   
+    // the monitor must have current readings in order to estimate consumed_mah and be healthy
+    if (!has_current() || !_state.healthy) {
+        return false;
+    }
+
+    percentage = _soc;
+    return true;
+}
+
 void AP_BattMonitor_MAV::read()
 {
             
@@ -31,10 +53,13 @@ void AP_BattMonitor_MAV::read()
     struct BatteryState batt_state;
     AP::Battery_MAV().get_state(batt_state,instance);
 
-    gcs().send_text(MAV_SEVERITY_CRITICAL, "Battery Voltage: %5.3f", batt_state.voltage);
+    //gcs().send_text(MAV_SEVERITY_CRITICAL, "Battery Voltage: %5.3f", batt_state.voltage);
     _state.voltage = batt_state.voltage;
     _state.current_amps = batt_state.current;
-    _state.consumed_mah = batt_state.consumed_mah;
+    _state.temperature = batt_state.temperature;
+    _soc = batt_state.state_of_charge;
+    _state.healthy = true;
+
 }
 
 #endif // AP_BATTERY_MAV_ENABLED

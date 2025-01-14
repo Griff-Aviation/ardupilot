@@ -19,7 +19,7 @@ void AP_Battery_MAV::get_state(BatteryState &_state, uint8_t inst)
 
 void AP_Battery_MAV::handle_BATTERY_message(const mavlink_message_t &msg)
 {
-    gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink Battery status handle");
+    //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink Battery status handle");
 
     mavlink_battery_status_t battery_status;
     mavlink_msg_battery_status_decode(&msg, &battery_status);
@@ -31,7 +31,8 @@ void AP_Battery_MAV::handle_BATTERY_message(const mavlink_message_t &msg)
 
     _batteries[battery_index].voltage = battery_status.voltages[0] / 1000.0f; // Convert mV to V
     _batteries[battery_index].current = battery_status.current_battery / 100.0f; // Convert cA to A
-    _batteries[battery_index].consumed_mah = battery_status.battery_remaining * 10; // Assume percentage to mAh
+    _batteries[battery_index].state_of_charge = battery_status.battery_remaining; // Assume percentage to mAh
+    _batteries[battery_index].temperature = battery_status.temperature / 100.0f; // Convert cdegC to degC
 
     _received_new_data[battery_index] = true;
 }

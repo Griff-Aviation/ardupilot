@@ -197,6 +197,12 @@ bool MAVLink_routing::check_and_forward(GCS_MAVLINK &in_link, const mavlink_mess
             if (&in_link != out_link && !sent_to_chan[routes[i].channel]) {
                 if (out_link->check_payload_size(msg.len)) {
 #if ROUTING_DEBUG
+                    gcs().send_text(MAV_SEVERITY_CRITICAL, "fwd msg %u from chan %u on chan %u sysid=%d compid=%d",
+                             msg.msgid,
+                             (unsigned)in_link.get_chan(),
+                             (unsigned)routes[i].channel,
+                             (int)target_system,
+                             (int)target_component);
                     ::printf("fwd msg %u from chan %u on chan %u sysid=%d compid=%d\n",
                              msg.msgid,
                              (unsigned)in_link.get_chan(),

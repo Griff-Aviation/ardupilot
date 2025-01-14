@@ -25,7 +25,9 @@
 struct BatteryState {
     float voltage;     // in Volts
     float current;     // in Amperes
-    float consumed_mah; // in mAh
+    float temperature; // in cdegC
+    uint8_t state_of_charge; // in percent
+    
 };
 
 class AP_Battery_MAV
