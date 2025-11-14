@@ -25,6 +25,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          Tools/environment_install/install-prereqs-ubuntu.sh -y
+          . ~/.profile
           sudo apt-get update
           sudo apt-get install -y \
             git \
