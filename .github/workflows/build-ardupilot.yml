@@ -14,7 +14,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: true  # ArduPilot uses submodules
+          submodules: recursive  # ArduPilot uses submodules
+
+      - name: Sync ArduPilot submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          # Or use ArduPilot's helper script, equivalent but "official":
+          # ./Tools/gittools/submodule-sync.sh
 
       - name: Install build dependencies
         run: |
