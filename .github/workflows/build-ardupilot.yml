@@ -49,6 +49,11 @@ jobs:
           # Optional: for faster builds
           echo 'export PATH="/usr/lib/ccache:$PATH"' | tee -a $GITHUB_ENV
 
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi gdb-arm-none-eabi binutils-arm-none-eabi
+
       - name: Install Python requirements
         run: |
           pip3 install --upgrade pip
