@@ -50,7 +50,11 @@
 #include <AP_VisualOdom/AP_VisualOdom.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
+
+#if AP_BATTERY_MAV_ENABLED
 #include <AP_Battery/AP_Battery_MAV.h>
+#endif
+
 #include <AP_ESC_Telem/AP_ESC_Telem_MAV.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include <AP_Scripting/AP_Scripting.h>
