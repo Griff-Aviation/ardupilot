@@ -566,7 +566,7 @@ void AC_PrecLand::run_estimator(float rangefinder_alt_m, bool rangefinder_alt_va
 
             // Update if a new Line-Of-Sight measurement is available
             if (construct_pos_meas_using_rangefinder(rangefinder_alt_m, rangefinder_alt_valid)) {
-                float xy_pos_var = sq(_target_pos_rel_meas_ned_m.z*(_xy_pos_nse_growth * + 0.01f*AP::ahrs().get_gyro().length() + _xy_pos_nse_base));
+                float xy_pos_var = sq(_target_pos_rel_meas_NED.z*(_xy_pos_nse_growth * + 0.01f*AP::ahrs().get_gyro().length() + _xy_pos_nse_base));
                 if (!_estimator_initialized) {
                     // Inform the user landing target has been found
                     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PrecLand: Target Found");
