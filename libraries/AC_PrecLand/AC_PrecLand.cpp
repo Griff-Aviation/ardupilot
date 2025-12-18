@@ -197,10 +197,10 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("XY_NSE_BASE", 19, AC_PrecLand, _xy_pos_nse_base, 0.02f),
 
-    // @Param: XY_NSE_GROWTH
+    // @Param: XY_NSE_GROW
     // @DisplayName: Kalman Filter XY Noise Growth
     // @Description: Kalman Filter XY Position Noise gradient, XY Noise increases linearly with z height above target
-    // @Units: m/m
+    // @Units: m
     // @Range: 0 0.05
     // @User: Advanced
     AP_GROUPINFO("XY_NSE_GROW", 20, AC_PrecLand, _xy_pos_nse_growth, 0.01f),
