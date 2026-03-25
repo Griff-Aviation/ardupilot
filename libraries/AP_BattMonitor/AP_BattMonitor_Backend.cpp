@@ -38,6 +38,7 @@
     25-26:  AP_BattMonitor_INA2xx.cpp
     27-28:  AP_BattMonitor_INA2xx.cpp, AP_BattMonitor_INA239.cpp (legacy duplication)
     30:     AP_BattMonitor_DroneCAN.cpp
+    31-33:  AP_BattMonitor_MAV.cpp
     36:     AP_BattMonitor_ESC.cpp
     40-43:  AP_BattMonitor_FuelLevel_Analog.cpp
     45-48:  AP_BattMonitor_FuelLevel_Analog.cpp

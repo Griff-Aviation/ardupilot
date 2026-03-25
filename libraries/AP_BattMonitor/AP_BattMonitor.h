@@ -263,6 +263,8 @@ public:
     bool handle_scripting(uint8_t idx, const struct BattMonitorScript_State &state);
 #endif
 
+    void handle_mavlink_battery_status(const mavlink_message_t &msg);
+
 protected:
 
     /// parameters
@@ -277,6 +279,7 @@ private:
     uint8_t     _num_instances;                                     /// number of monitors
 
     void convert_dynamic_param_groups(uint8_t instance);
+    void warn_on_duplicate_mavlink_identities() const;
 
     /// returns the failsafe state of the battery
     Failsafe check_failsafe(const uint8_t instance);
