@@ -720,14 +720,14 @@ AP_BattMonitor::init()
         if (drivers[instance] != nullptr) {
             state[instance].type = allocation_type;
         }
-    // if the backend has some local parameters then make those available in the tree
-    if (drivers[instance] && state[instance].var_info) {
-        backend_var_info[instance] = state[instance].var_info;
-        AP_Param::load_object_from_eeprom(drivers[instance], backend_var_info[instance]);
+        // if the backend has some local parameters then make those available in the tree
+        if (drivers[instance] && state[instance].var_info) {
+            backend_var_info[instance] = state[instance].var_info;
+            AP_Param::load_object_from_eeprom(drivers[instance], backend_var_info[instance]);
 
-        // param count could have changed
-        AP_Param::invalidate_count();
-    }
+            // param count could have changed
+            AP_Param::invalidate_count();
+        }
 
         // call init function for each backend
         if (drivers[instance] != nullptr) {
@@ -742,6 +742,43 @@ AP_BattMonitor::init()
             convert_dynamic_param_groups(instance);
         }
     }
+
+    warn_on_duplicate_mavlink_identities();
+}
+
+void AP_BattMonitor::warn_on_duplicate_mavlink_identities() const
+{
+#if AP_BATTERY_MAV_ENABLED
+    for (uint8_t i = 0; i < _num_instances; i++) {
+        if (drivers[i] == nullptr || allocated_type(i) != Type::Mavlink) {
+            continue;
+        }
+        const auto *lhs = static_cast<const AP_BattMonitor_MAV *>(drivers[i]);
+        if (lhs->configured_sysid() < 0 ||
+            lhs->configured_compid() < 0 ||
+            lhs->configured_battery_id() < 0) {
+            continue;
+        }
+        for (uint8_t j = i + 1; j < _num_instances; j++) {
+            if (drivers[j] == nullptr || allocated_type(j) != Type::Mavlink) {
+                continue;
+            }
+            const auto *rhs = static_cast<const AP_BattMonitor_MAV *>(drivers[j]);
+            if (lhs->configured_sysid() != rhs->configured_sysid() ||
+                lhs->configured_compid() != rhs->configured_compid() ||
+                lhs->configured_battery_id() != rhs->configured_battery_id()) {
+                continue;
+            }
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                          "Battery %u and %u share MAV src %d/%d/%d",
+                          unsigned(i + 1),
+                          unsigned(j + 1),
+                          int(lhs->configured_sysid()),
+                          int(lhs->configured_compid()),
+                          int(lhs->configured_battery_id()));
+        }
+    }
+#endif
 }
 
 void AP_BattMonitor::convert_dynamic_param_groups(uint8_t instance)
@@ -851,6 +888,26 @@ void AP_BattMonitor::read()
 // healthy - returns true if monitor is functioning
 bool AP_BattMonitor::healthy(uint8_t instance) const {
     return instance < _num_instances && state[instance].healthy;
+}
+
+void AP_BattMonitor::handle_mavlink_battery_status(const mavlink_message_t &msg)
+{
+#if AP_BATTERY_MAV_ENABLED
+    mavlink_battery_status_t battery_status {};
+    mavlink_msg_battery_status_decode(&msg, &battery_status);
+
+    for (uint8_t i = 0; i < _num_instances; i++) {
+        if (drivers[i] == nullptr || allocated_type(i) != Type::Mavlink) {
+            continue;
+        }
+        auto *driver = static_cast<AP_BattMonitor_MAV *>(drivers[i]);
+        if (driver->handle_battery_status(msg, battery_status)) {
+            return;
+        }
+    }
+#else
+    (void)msg;
+#endif
 }
 
 /// voltage - returns battery voltage in volts
