@@ -28,6 +28,8 @@
 //#define ESC_TELEM_DEBUG
 
 #define ESC_RPM_CHECK_TIMEOUT_US 210000UL   // timeout for motor running validity
+#define ESC_MOTOR_TEMP_DELTA_CDEG 100       // publish motor temp after at least 1.0C change
+#define ESC_MOTOR_TEMP_SEND_MIN_MS 1000     // limit motor temp bridge to 1Hz per ESC
 
 extern const AP_HAL::HAL& hal;
 
@@ -798,6 +800,10 @@ void AP_ESC_Telem::update()
     }
 #endif  // HAL_LOGGING_ENABLED
 
+#if HAL_GCS_ENABLED
+    send_motor_temperature_named_floats();
+#endif
+
     for (uint8_t i = 0; i < ESC_TELEM_MAX_ESCS; i++) {
         // copy the last_updated_us timestamp to avoid any race issues
         const uint32_t last_updated_us = _rpm_data[i].last_update_us;
@@ -813,6 +819,44 @@ void AP_ESC_Telem::update()
             _telem_data[i].any_data_valid = false;
         }
     }
+}
+
+void AP_ESC_Telem::send_motor_temperature_named_floats()
+{
+#if HAL_GCS_ENABLED
+    if (!_have_data) {
+        return;
+    }
+
+    const uint32_t now_ms = AP_HAL::millis();
+
+    for (uint8_t i = 0; i < ESC_TELEM_MAX_ESCS; i++) {
+        int16_t motor_temp_cdeg = 0;
+        if (!get_motor_temperature(i, motor_temp_cdeg)) {
+            _motor_temp_sent[i] = false;
+            continue;
+        }
+
+        const bool first_send = !_motor_temp_sent[i];
+        int32_t temp_delta_cdeg = (int32_t)motor_temp_cdeg - _last_motor_temp_sent_cdeg[i];
+        if (temp_delta_cdeg < 0) {
+            temp_delta_cdeg = -temp_delta_cdeg;
+        }
+        const bool changed = temp_delta_cdeg >= ESC_MOTOR_TEMP_DELTA_CDEG;
+        const bool rate_limited = !first_send && (now_ms - _last_motor_temp_send_ms[i]) < ESC_MOTOR_TEMP_SEND_MIN_MS;
+        if (!first_send && (!changed || rate_limited)) {
+            continue;
+        }
+
+        char name[MAVLINK_MSG_NAMED_VALUE_FLOAT_FIELD_NAME_LEN + 1] {};
+        hal.util->snprintf(name, sizeof(name), "MTMP%u", unsigned(i + 1));
+        gcs().send_named_float(name, motor_temp_cdeg * 0.01f);
+
+        _last_motor_temp_send_ms[i] = now_ms;
+        _last_motor_temp_sent_cdeg[i] = motor_temp_cdeg;
+        _motor_temp_sent[i] = true;
+    }
+#endif
 }
 
 // NOTE: This function should only be used to check timeouts other than 

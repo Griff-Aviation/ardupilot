@@ -150,6 +150,9 @@ private:
 
     uint32_t _last_telem_log_ms[ESC_TELEM_MAX_ESCS];
     uint32_t _last_rpm_log_us[ESC_TELEM_MAX_ESCS];
+    uint32_t _last_motor_temp_send_ms[ESC_TELEM_MAX_ESCS];
+    int16_t _last_motor_temp_sent_cdeg[ESC_TELEM_MAX_ESCS];
+    bool _motor_temp_sent[ESC_TELEM_MAX_ESCS];
     uint8_t next_idx;
 
 #if AP_SCRIPTING_ENABLED
@@ -161,6 +164,8 @@ private:
     bool _have_data;
 
     AP_Int8 mavlink_offset;
+
+    void send_motor_temperature_named_floats();
 
     static AP_ESC_Telem *_singleton;
 };
