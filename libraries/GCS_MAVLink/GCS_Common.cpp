@@ -51,7 +51,9 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 
+#if HAL_WITH_ESC_TELEM
 #include <AP_ESC_Telem/AP_ESC_Telem_MAV.h>
+#endif
 #include <AP_Proximity/AP_Proximity.h>
 #include <AP_Scripting/AP_Scripting.h>
 #include <SRV_Channel/SRV_Channel.h>
@@ -4607,19 +4609,32 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         break;
     }
 #endif
+#if HAL_WITH_ESC_TELEM
     case MAVLINK_MSG_ID_ESC_TELEMETRY_1_TO_4:
     {
-        //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink ESC status 1-4 recived");
-        AP::ESC_Telem_MAV().handle_ESC_message(msg,0);
+        AP::ESC_Telem_MAV().handle_message(msg);
         break;
     }
 
     case MAVLINK_MSG_ID_ESC_TELEMETRY_5_TO_8:
     {
-        //gcs().send_text(MAV_SEVERITY_CRITICAL, "Mavlink ESC status 5-8 recived");
-        AP::ESC_Telem_MAV().handle_ESC_message(msg,1);
+        AP::ESC_Telem_MAV().handle_message(msg);
         break;
     }
+
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_9_TO_12:
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_13_TO_16:
+#if ESC_TELEM_MAX_ESCS > 16
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_17_TO_20:
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_21_TO_24:
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_25_TO_28:
+    case MAVLINK_MSG_ID_ESC_TELEMETRY_29_TO_32:
+#endif
+    {
+        AP::ESC_Telem_MAV().handle_message(msg);
+        break;
+    }
+#endif
 
 #if AP_GENERATOR_LOWEHEISER_ENABLED
     case MAVLINK_MSG_ID_LOWEHEISER_GOV_EFI:

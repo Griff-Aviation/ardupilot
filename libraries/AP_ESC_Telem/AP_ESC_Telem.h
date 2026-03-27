@@ -108,6 +108,10 @@ public:
         return _telem_data[esc_index].last_update_ms;
     }
 
+    int16_t get_mavlink_source_system() const { return mavlink_source_system; }
+    int16_t get_mavlink_source_component() const { return mavlink_source_component; }
+    float get_mavlink_rpm_scale() const { return mavlink_rpm_scale; }
+
     // send telemetry data to mavlink
     void send_esc_telemetry_mavlink(uint8_t mav_chan);
 
@@ -164,6 +168,9 @@ private:
     bool _have_data;
 
     AP_Int8 mavlink_offset;
+    AP_Int16 mavlink_source_system;
+    AP_Int16 mavlink_source_component;
+    AP_Float mavlink_rpm_scale;
 
     void send_motor_temperature_named_floats();
 

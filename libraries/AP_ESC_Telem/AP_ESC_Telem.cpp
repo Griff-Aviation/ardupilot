@@ -43,6 +43,27 @@ const AP_Param::GroupInfo AP_ESC_Telem::var_info[] = {
     // @Range: 0 31
     // @User: Standard
     AP_GROUPINFO("_MAV_OFS", 1, AP_ESC_Telem, mavlink_offset, 0),
+
+    // @Param: _MAV_SYS
+    // @DisplayName: ESC Telemetry MAVLink source system
+    // @Description: Exact MAVLink system id this ESC telemetry ingest accepts. Set to -1 to leave the ingest path unconfigured.
+    // @Range: -1 255
+    // @User: Advanced
+    AP_GROUPINFO("_MAV_SYS", 2, AP_ESC_Telem, mavlink_source_system, -1),
+
+    // @Param: _MAV_CMP
+    // @DisplayName: ESC Telemetry MAVLink source component
+    // @Description: Exact MAVLink component id this ESC telemetry ingest accepts. Set to -1 to leave the ingest path unconfigured.
+    // @Range: -1 255
+    // @User: Advanced
+    AP_GROUPINFO("_MAV_CMP", 3, AP_ESC_Telem, mavlink_source_component, -1),
+
+    // @Param: _MAV_RPMS
+    // @DisplayName: ESC Telemetry MAVLink RPM scale
+    // @Description: Multiplicative scale factor applied to RPM values ingested from MAVLink ESC telemetry.
+    // @Range: 0.01 100.0
+    // @User: Advanced
+    AP_GROUPINFO("_MAV_RPMS", 4, AP_ESC_Telem, mavlink_rpm_scale, 1.0f),
     
     AP_GROUPEND
 };
