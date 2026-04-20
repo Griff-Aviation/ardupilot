@@ -1274,7 +1274,7 @@ LOG_STRUCTURE_FROM_AIS \
     { LOG_MOTBATT_MSG, sizeof(log_MotBatt), \
       "MOTB", "QfffffB",  "TimeUS,LiftMax,BatVolt,ThLimit,ThrAvMx,ThrOut,FailFlags", "s------", "F------" , true }, \
     { LOG_DEBUG_FLOAT_ARRAY_MSG, sizeof(log_DEBUG_FLOAT_ARRAY), \
-      "DEBUG", "QHZZZNNN", "TimeUS,ArrayID,DataA64,DataB64,DataC64,DataD16,DataE16,DataF16", "s-------", "F-------", true }
+      "DBFA", "QHZZZNNN", "TimeUS,ArrayID,DataA64,DataB64,DataC64,DataD16,DataE16,DataF16", "s-------", "F-------", true }
 
 // message types 0 to 31 reserved for vehicle-specific use
 
