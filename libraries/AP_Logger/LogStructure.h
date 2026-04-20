@@ -1151,6 +1151,17 @@ struct PACKED log_DEBUG_FLOAT_ARRAY {
 // @Field: ThrOut: Throttle output
 // @Field: FailFlags: bit 0 motor failed, bit 1 motors balanced, should be 2 in normal flight
 
+// @LoggerMessage: DBFA
+// @Description: Logged MAVLink DEBUG_FLOAT_ARRAY payload for large debug and prototyping float arrays
+// @Field: TimeUS: Time since system startup
+// @Field: ArrayID: Unique identifier copied from the MAVLink DEBUG_FLOAT_ARRAY array_id field
+// @Field: DataA64: First 64-byte chunk of float payload data
+// @Field: DataB64: Second 64-byte chunk of float payload data
+// @Field: DataC64: Third 64-byte chunk of float payload data
+// @Field: DataD16: First 16-byte chunk of the remaining float payload data
+// @Field: DataE16: Second 16-byte chunk of the remaining float payload data
+// @Field: DataF16: Final 16-byte chunk of the remaining float payload data
+
 // messages for all boards
 #define LOG_COMMON_STRUCTURES \
     { LOG_FORMAT_MSG, sizeof(log_Format), \
