@@ -93,6 +93,22 @@ class VehicleInfo(object):
                 "default_params_filename": ["default_params/copter.parm",
                                             "default_params/copter-octa.parm" ],
             },
+            # Griff airframes. "model" must be set explicitly: options_for_frame()
+            # otherwise passes the frame name to the binary as the SITL model.
+            # Selecting one of these also starts the B100 payload/power
+            # simulator, unless --no-griff-b100 is given.
+            "Griff30": {
+                "model": "X",
+                "waf_target": "bin/arducopter",
+                "default_params_filename": ["default_params/copter.parm",
+                                            "default_params/griff30.parm" ],
+            },
+            "Griff-Hybrid": {
+                "model": "X",
+                "waf_target": "bin/arducopter",
+                "default_params_filename": ["default_params/copter.parm",
+                                            "default_params/griff-hybrid.parm" ],
+            },
             "octa-dji": {
                 "waf_target": "bin/arducopter",
                 "default_params_filename": [

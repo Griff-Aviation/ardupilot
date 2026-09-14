@@ -845,6 +845,13 @@ def start_vehicle(binary, opts, stuff, spawns=None):
             c.extend(["--serial0", "mcast:"])
         elif opts.udp:
             c.extend(["--serial0", "udpclient:127.0.0.1:" + str(5760+i*10)])
+        if opts.frame in griff_frame_airframes and not opts.no_griff_b100:
+            # Give the B100 simulator a serial port behind the autopilot, which
+            # is where the real board sits (UART7). The autopilot then routes
+            # Griff commands to compid 25 and relays its telemetry to every GCS,
+            # instead of the simulator having to be a second sender on the GCS
+            # port. griff-*.parm sets SERIAL5_PROTOCOL so it is MAVLink2.
+            c.extend(["--serial5", "tcp:" + str(griff_b100_port(i))])
         if opts.auto_sysid:
             if opts.sysid is not None:
                 raise ValueError("Can't use auto-sysid and sysid together")
@@ -857,6 +864,35 @@ def start_vehicle(binary, opts, stuff, spawns=None):
         os.chdir(i_dir)
         run_in_terminal_window(cmd_name, cmd + c)
     os.chdir(old_dir)
+
+
+# Griff frames and the airframe profile each one runs the B100 simulator with.
+griff_frame_airframes = {
+    "Griff30": "griff30",
+    "Griff-Hybrid": "griff-hybrid",
+}
+
+
+def griff_b100_port(instance):
+    """TCP port of the SITL serial the B100 simulator attaches to."""
+    return 5765 + 10 * instance
+
+
+def start_griff_b100(opts):
+    """Launch the Griff B100 payload/power simulator in its own window.
+
+    It is an independent MAVLink sender aimed at the GCS port, not a client of
+    SITL, so it neither touches the vehicle link nor depends on SITL being up.
+    """
+    airframe = griff_frame_airframes[opts.frame]
+    port = griff_b100_port(instances[0] if instances else 0)
+    cmd = [os.path.join(autotest_dir, "griff_b100_sim.py"),
+           "--airframe", airframe,
+           "--connect", "tcp:127.0.0.1:" + str(port)]
+    if opts.griff_b100_args:
+        cmd.extend(shlex.split(opts.griff_b100_args))
+    progress("Starting Griff B100 simulator (%s) on port %u" % (airframe, port))
+    run_in_terminal_window("GriffB100", cmd)
 
 
 def start_mavproxy(opts, stuff):
@@ -1254,6 +1290,16 @@ group_sim.add_option("", "--no-mavproxy",
                      action='store_true',
                      default=False,
                      help="Don't launch MAVProxy")
+group_sim.add_option("", "--no-griff-b100",
+                     action='store_true',
+                     default=False,
+                     help="For Griff frames, do not launch the B100 "
+                          "payload/power simulator")
+group_sim.add_option("", "--griff-b100-args",
+                     default="",
+                     type='string',
+                     help="Extra arguments for the Griff B100 simulator, "
+                          "e.g. \"--minimal -v\"")
 group_sim.add_option("", "--fresh-params",
                      action='store_true',
                      dest='fresh_params',
@@ -1665,6 +1711,9 @@ if cmd_opts.frame in ['scrimmage-plane', 'scrimmage-copter']:
 if cmd_opts.delay_start:
     progress("Sleeping for %f seconds" % (cmd_opts.delay_start,))
     time.sleep(float(cmd_opts.delay_start))
+
+if cmd_opts.frame in griff_frame_airframes and not cmd_opts.no_griff_b100:
+    start_griff_b100(cmd_opts)
 
 try:
     if cmd_opts.no_mavproxy:

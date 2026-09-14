@@ -1,0 +1,7 @@
+# Griff 30 - all-electric heavy-lift quadcopter (4 arms, 4 motors).
+# Flight dynamics are a stock X quad; the Griff-specific behaviour is the B100
+# payload/power module, simulated by Tools/autotest/griff_b100_sim.py.
+# FRAME_CLASS 1 (Quad) comes from copter.parm; FRAME_TYPE 1 selects X.
+FRAME_TYPE      1
+# SERIAL5 carries the B100 link, as UART7 does on the real aircraft.
+SERIAL5_PROTOCOL 2
