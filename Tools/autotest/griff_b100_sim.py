@@ -1123,6 +1123,33 @@ def sweep_values(t, period):
     return out
 
 
+def connect_with_retry(connect, sysid, compid, timeout):
+    """Open the link, waiting for the far end to appear.
+
+    SITL binds SERIAL5 only once a GCS has connected to SERIAL0, and
+    sim_vehicle.py starts this simulator before the autopilot exists at all, so
+    the port is routinely absent for the first several seconds. pymavlink gives
+    up after six attempts, which used to kill the simulator outright and leave
+    the autopilot answering Griff commands itself -- an ACK from 1/1 rather than
+    1/25. Keep retrying instead, and reconnect if SITL is later restarted.
+    """
+    deadline = time.time() + timeout
+    announced = False
+    while True:
+        try:
+            return mavutil.mavlink_connection(connect, source_system=sysid,
+                                              source_component=compid,
+                                              autoreconnect=True, retries=1)
+        except Exception as e:
+            if time.time() >= deadline:
+                raise SystemExit("B100 sim: could not connect to %s after %.0fs: %s"
+                                 % (connect, timeout, e))
+            if not announced:
+                print("B100 sim: waiting for %s ..." % (connect,))
+                announced = True
+            time.sleep(1.0)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1180,10 +1207,13 @@ def main():
                          "--script 'scenario gen-loss'")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="log state each second and every command handled")
+    ap.add_argument("--connect-timeout", type=float, default=120.0,
+                    help="seconds to keep retrying the connection before "
+                         "giving up (default: %(default)s)")
     args = ap.parse_args()
 
-    mav = mavutil.mavlink_connection(args.connect, source_system=args.sysid,
-                                     source_component=args.compid)
+    mav = connect_with_retry(args.connect, args.sysid, args.compid,
+                             args.connect_timeout)
     print("B100 sim: %s, sys %u comp %u on %s, mode=%s"
           % (args.airframe, args.sysid, args.compid, args.connect, args.mode))
     if args.mode == "sim" and not args.power_on:

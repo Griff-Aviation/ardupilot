@@ -881,8 +881,12 @@ def griff_b100_port(instance):
 def start_griff_b100(opts):
     """Launch the Griff B100 payload/power simulator in its own window.
 
-    It is an independent MAVLink sender aimed at the GCS port, not a client of
-    SITL, so it neither touches the vehicle link nor depends on SITL being up.
+    It attaches to SITL's SERIAL5 as a TCP client, which is where the real board
+    sits on UART7, and reaches the GCS only through the autopilot's routing --
+    it is not a second sender on the GCS port. It therefore depends on SITL
+    being up: SITL binds SERIAL5 only after a GCS connects to SERIAL0, which is
+    later than this call, so the simulator retries the connection until the port
+    appears (--connect-timeout).
     """
     airframe = griff_frame_airframes[opts.frame]
     port = griff_b100_port(instances[0] if instances else 0)

@@ -130,7 +130,7 @@ if maybe_prompt_user "Install python using pyenv [N/y]?" ; then
         echo $evalline >> ~/$SHELL_LOGIN
         evalline="eval \"\$(pyenv init -)\""
         echo $evalline >> ~/$SHELL_LOGIN
-        source ~/$SHELL_LOGIN
+        # source ~/$SHELL_LOGIN
     }
     echo "pyenv installed"
     {
