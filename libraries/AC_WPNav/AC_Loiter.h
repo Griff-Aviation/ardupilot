@@ -81,6 +81,7 @@ protected:
     AP_Float    _brake_accel_cmss;      // loiter's acceleration during braking in cm/s/s
     AP_Float    _brake_jerk_max_cmsss;
     AP_Float    _brake_delay;           // delay (in seconds) before loiter braking begins after sticks are released
+    AP_Float    _speed_terminal_ne_cms; // horizontal terminal speed in cm/s at LOIT_ANG_MAX
 
     // loiter controller internal variables
     Vector2f    _desired_accel;         // slewed pilot's desired acceleration in lat/lon frame
