@@ -8,8 +8,10 @@ that behaves like a real hybrid Griff.
 
 Behaviour is taken from the real firmware (G135-B100-2022):
   Project_files/GA_mavlink.cpp                -- command dispatch and ACK rules
+  Project_files/griff/services/freja_*.{cpp,hpp} -- Freja CAN -> TUNNEL bridge
   docs/MavlinkNamedValueFloatFields.md        -- field catalog, rates, packing
   docs/GriffControlsCommandDebugAndAck.md     -- debug/ACK contract
+  docs/FREJA_MAVLINK_TUNNEL_V1.md             -- TUNNEL payload wire format
 
 which means, faithfully:
   * NAMED_VALUE telemetry from sysid 1 / compid 25, normal set at 1 Hz, claw at
@@ -25,12 +27,26 @@ which means, faithfully:
   * PWRSTAT is battery transistor feedback, not the commanded state, so it
     passes through 9 (mixed/stale) before settling to 1 or 0
   * GFSTATE packs as 100*MAIN + 10*NAV + PLD with 9 for unknown (999 at boot)
+  * on a hybrid airframe, the Freja EMU's telemetry leaves the board as two
+    private MAVLink TUNNEL payloads every 200 ms -- 0x8001 HybridStatus (22 B)
+    and 0x8002 Operator (29 B), broadcast to 0/0, unsigned big-endian, with
+    B100's bridge state in byte 1 and the unavailable sentinels intact
 
-The engine and hybrid fields (ENGRPM, ENGTEMP, GENTEMP, BATTRSV, HYBSTAT,
-HYBREASON, HYBFLTIME) are NOT in the B100 firmware -- per
-GriffCustomTelemetry.json they come from the separate Griff_Hybrid_Telemetry
-draft, so they are modelled here as a plausible EMU/generator plant rather than
-copied from a reference implementation. Use --no-hybrid to omit them.
+That TUNNEL pair is how the shipping board actually delivers hybrid data, so it
+is what this simulator publishes by default. The older NAMED_VALUE hybrid block
+(ENGRPM, ENGTEMP, GENTEMP, BATTRSV, HYBSTAT, HYBREASON, HYBFLTIME) is NOT in the
+B100 firmware and never was: per GriffCustomTelemetry.json those fields come from
+the separate Griff_Hybrid_Telemetry draft. They are still available for the GCS
+work that reads them -- --hybrid-transport nval sends them instead of the tunnel,
+and "both" sends each -- but "tunnel" is the default because it is the truth.
+Either way --no-hybrid omits the whole hybrid side.
+
+Bridge state is B100's own namespace and never replaces a Freja ReasonCode. It
+is 0 when a CAN cycle has been accepted within 500 ms, 1 when none ever has, and
+2 once the last accepted cycle ages out; 1 and 2 both publish Freja status
+INVALID (10) with reason 0 and the unavailable sentinels, rather than a stale but
+plausible reading. A rejected frame never refreshes the sample, so an integrity
+or source-id fault ages out to state 2 exactly as a silent bus does.
 
 Usage -- pick the topology that matches what you are testing:
 
@@ -168,6 +184,57 @@ RESERVE_NORMAL_S = 120.0    # needed to enter NORMAL out of STARTING
 # lowers it when the extra traffic is not wanted.
 HYB_PUBLISH_HZ = 10.0
 
+# --------------------------------------------------- Freja MAVLink TUNNEL v1
+# G135-B100-2022 docs/FREJA_MAVLINK_TUNNEL_V1.md, implemented in
+# Project_files/griff/services/freja_mavlink_payload.cpp. The board forwards the
+# Freja EMU's CAN cycle as two private TUNNEL payloads every 200 ms while the
+# hybrid system is installed. Multibyte fields are unsigned big-endian and every
+# unused payload byte is zero.
+
+TUNNEL_HYBRID_TYPE = 0x8001
+TUNNEL_HYBRID_LEN = 22
+TUNNEL_OPERATOR_TYPE = 0x8002
+TUNNEL_OPERATOR_LEN = 29
+TUNNEL_PAYLOAD_BYTES = 128      # mavlink_tunnel_t.payload is fixed width
+TUNNEL_VERSION = 1              # byte 0 of both payloads
+TUNNEL_PUBLISH_HZ = 5.0         # the firmware's 200 ms FrejaTunnelTimer
+
+U8_NA = 0xFF                    # "unavailable", not a measurement of zero
+U16_NA = 0xFFFF
+
+# Byte 1 of both payloads: B100's view of the CAN link, in its own namespace.
+BRIDGE_FRESH, BRIDGE_NEVER, BRIDGE_STALE = 0, 1, 2
+FREJA_CAN_HZ = 10.0             # Freja publishes its cycle at 10 Hz
+FREJA_CAN_TIMEOUT_S = 0.5       # Receiver::hybrid() / operator_telemetry()
+AGE_NEVER = 0xFFFF              # received_age_ms with no accepted cycle ever
+AGE_MAX = 0xFFFE                # everything older saturates here
+FREJA_REASON_MAX = 12           # the validator accepts 0..12; the drafts name 0..7
+FREJA_MODEL_REVISION = 1
+
+# Validity and state bits in the HybridStatus payload. B100's frame validator
+# rejects a cycle with reserved bits set, so the sim must stay inside the same
+# masks: input <= 0x7F, status <= 0x1F, reserve <= 0x3F, latch <= 0x07.
+IN_BUS, IN_GEN, IN_ENGINE, IN_FUEL, IN_RESERVE = 0x01, 0x02, 0x04, 0x08, 0x40
+ST_ENGINE_RUN, ST_GEN_ONLINE, ST_CHARGING, ST_FUEL_LOW = 0x01, 0x02, 0x04, 0x08
+RSV_ESTIMATED, RSV_LOW, RSV_CRITICAL = 0x01, 0x02, 0x04
+LATCH_GEN_LOST, LATCH_RESERVE_LOW = 0x01, 0x02
+
+# Criteria flags: which NORMAL-entry tests the EMU implements, which of those are
+# configured on this airframe, and which are satisfied right now.
+CRIT_RESERVE, CRIT_GEN, CRIT_ENGINE, CRIT_THERMAL = 0x01, 0x02, 0x04, 0x08
+CRIT_IMPLEMENTED = CRIT_RESERVE | CRIT_GEN | CRIT_ENGINE | CRIT_THERMAL
+CRIT_CONFIGURED = CRIT_RESERVE | CRIT_GEN | CRIT_ENGINE
+
+# Operator payload flags. Each value is replaced by its unavailable sentinel
+# when the matching bit is clear, even if the raw reading looks plausible.
+PWR_VBUS, PWR_GEN = 0x01, 0x02
+NRG_SOC, NRG_SOC_ESTIMATED, NRG_BAT12, NRG_BAT34 = 0x01, 0x02, 0x04, 0x08
+PRP_RPM, PRP_FUEL1, PRP_FUEL2 = 0x01, 0x04, 0x08
+THM_GEN_MOTOR, THM_GEN_CTRL, THM_CHT, THM_BATTERY = 0x01, 0x02, 0x04, 0x08
+
+BRIDGE_NAMES = {BRIDGE_FRESH: "FRESH", BRIDGE_NEVER: "NO_CYCLE",
+                BRIDGE_STALE: "STALE"}
+
 AMBIENT_C = 15.0
 IDLE_RPM = 2400.0
 CRUISE_RPM = 6200.0
@@ -177,6 +244,22 @@ RESERVE_FULL_S = 300.0      # BATTRSV is seconds of reserve, not capacity
 FLT_TIME_NOMINAL_S = 180.0  # HYBFLTIME is "Forced Landing Time"
 CLAW_LOAD_KG = 12.4
 STALE_SENTINEL = -999.0     # CLAWLDKG / CLAWSTAT stale marker
+
+# Freja operator-telemetry plant. None of these are B100 fields either; they are
+# the quantities the 0x8002 payload carries, modelled plausibly so that a CU
+# decoder has something with the right shape and units to render.
+BUS_NOMINAL_V = 53.2        # generator online
+BUS_RESERVE_V = 47.5        # flying on the battery reserve
+# Pack voltage is measured at the batteries, so it does not follow the bus: the
+# packs read their state of charge whether or not main power is closed.
+BAT_EMPTY_V = 45.0
+BAT_FULL_V = 54.6
+BAT_SAG_V = 1.5             # under reserve-only load
+GEN_FULL_W = 19000.0        # aggregate generator output at cruise
+BATT_RUN_C = 32.0
+FUEL_BURN_PCT_S = 0.012     # per tank, per second, at cruise rpm
+FUEL_LOW_PCT = 15.0
+RESERVE_CRITICAL_S = 30.0
 
 # --------------------------------------------------------------- field sets
 # Grouped by publish schedule, exactly as documented for the real board.
@@ -259,6 +342,114 @@ def state_digit(latched):
     return 9 if latched < 0 else int(latched)
 
 
+# ------------------------------------------------ TUNNEL payload encoding
+# Byte-for-byte freja_mavlink_payload.cpp. Keep the two in step: the CU decoder
+# this exercises is written against the table in FREJA_MAVLINK_TUNNEL_V1.md, so
+# a field that moves here without moving there is a silent wire break.
+
+
+def _u8(value):
+    return int(max(0, min(0xFF, round(value))))
+
+
+def _u16(value):
+    return int(max(0, min(0xFFFF, round(value))))
+
+
+def _put_u16(buf, offset, value):
+    buf[offset] = (value >> 8) & 0xFF
+    buf[offset + 1] = value & 0xFF
+
+
+def _put_u32(buf, offset, value):
+    value &= 0xFFFFFFFF
+    buf[offset] = (value >> 24) & 0xFF
+    buf[offset + 1] = (value >> 16) & 0xFF
+    buf[offset + 2] = (value >> 8) & 0xFF
+    buf[offset + 3] = value & 0xFF
+
+
+def encode_hybrid_tunnel(f, tick_ms):
+    """22-byte payload type 0x8001.
+
+    A nonzero bridge state publishes INVALID with reason 0 and leaves the rest
+    zero, rather than a stale but plausible status -- that distinction is the
+    whole point of the bridge-state byte, so it is not a shortcut here either.
+    """
+    b = bytearray(TUNNEL_PAYLOAD_BYTES)
+    b[0] = TUNNEL_VERSION
+    b[1] = f["bridge"]
+    if f["bridge"] == BRIDGE_FRESH:
+        b[2] = f["sequence"]
+        b[3] = f["status"]
+        b[4] = f["reason"]
+        b[5] = f["input_flags"]
+        b[6] = f["status_flags"]
+        _put_u16(b, 7, _u16(f["reserve_s"])
+                 if f["input_flags"] & IN_RESERVE else U16_NA)
+        _put_u16(b, 9, _u16(f["model_revision"]))
+        b[11] = f["reserve_flags"]
+        b[12] = f["implemented_flags"]
+        b[13] = f["configured_flags"]
+        b[14] = f["satisfied_flags"]
+        b[15] = f["latch_flags"]
+    else:
+        b[3] = HYB_INVALID
+        _put_u16(b, 7, U16_NA)
+    _put_u16(b, 16, f["age_ms"])
+    _put_u32(b, 18, tick_ms)
+    return b
+
+
+def encode_operator_tunnel(f, tick_ms):
+    """29-byte payload type 0x8002."""
+    b = bytearray(TUNNEL_PAYLOAD_BYTES)
+    b[0] = TUNNEL_VERSION
+    b[1] = f["bridge"]
+    if f["bridge"] == BRIDGE_FRESH:
+        pwr = f["power_flags"]
+        nrg = f["energy_flags"]
+        prp = f["propulsion_flags"]
+        thm = f["thermal_flags"]
+        b[2] = f["sequence"]
+        _put_u16(b, 3, _u16(f["bus_v"] * 10.0) if pwr & PWR_VBUS else U16_NA)
+        _put_u16(b, 5, _u16(f["gen_w"] / 100.0) if pwr & PWR_GEN else U16_NA)
+        b[7] = pwr
+        _put_u16(b, 8, _u16(f["soc_pct"] * 10.0) if nrg & NRG_SOC else U16_NA)
+        b[10] = _u8(f["bat12_v"] * 2.0) if nrg & NRG_BAT12 else U8_NA
+        b[11] = _u8(f["bat34_v"] * 2.0) if nrg & NRG_BAT34 else U8_NA
+        b[12] = nrg
+        _put_u16(b, 13, _u16(f["rpm"]) if prp & PRP_RPM else U16_NA)
+        b[15] = _u8(f["fuel1_pct"]) if prp & PRP_FUEL1 else U8_NA
+        b[16] = _u8(f["fuel2_pct"]) if prp & PRP_FUEL2 else U8_NA
+        b[17] = prp
+        b[18] = _u8(f["gen_motor_c"]) if thm & THM_GEN_MOTOR else U8_NA
+        b[19] = _u8(f["gen_ctrl_c"]) if thm & THM_GEN_CTRL else U8_NA
+        b[20] = _u8(f["cht_c"]) if thm & THM_CHT else U8_NA
+        b[21] = _u8(f["batt_c"]) if thm & THM_BATTERY else U8_NA
+        b[22] = thm
+    else:
+        _put_u16(b, 3, U16_NA)
+        _put_u16(b, 5, U16_NA)
+        _put_u16(b, 8, U16_NA)
+        b[10] = U8_NA
+        b[11] = U8_NA
+        _put_u16(b, 13, U16_NA)
+        b[15] = U8_NA
+        b[16] = U8_NA
+        b[18] = U8_NA
+        b[19] = U8_NA
+        b[20] = U8_NA
+        b[21] = U8_NA
+    _put_u16(b, 23, f["age_ms"])
+    _put_u32(b, 25, tick_ms)
+    return b
+
+
+TUNNEL_PAYLOADS = ((TUNNEL_HYBRID_TYPE, TUNNEL_HYBRID_LEN, encode_hybrid_tunnel),
+                   (TUNNEL_OPERATOR_TYPE, TUNNEL_OPERATOR_LEN, encode_operator_tunnel))
+
+
 class B100:
     """State of the simulated payload/power module."""
 
@@ -307,6 +498,23 @@ class B100:
         self.reason = RSN_NONE
         self.powered_at = None
         self.normal_entered = False
+        self.phase = "off"          # last phase _step_hybrid resolved
+        self.gen_lost = False       # ... and its debounced generator verdict
+
+        # Freja operator telemetry, carried by TUNNEL 0x8002
+        self.bus_v = 0.0
+        self.gen_w = 0.0
+        self.soc_pct = 100.0 * reserve_s / RESERVE_FULL_S
+        self.fuel1_pct = 100.0
+        self.fuel2_pct = 100.0
+        self.batt_c = AMBIENT_C
+
+        # the Freja CAN cycle as Receiver tracks it: only an accepted cycle
+        # refreshes the sample, and only a fresh sample makes the bridge valid
+        self.freja_seq = 0
+        self.freja_accepted = None  # sim time of the last accepted cycle
+        self.freja_rejected = 0
+        self.freja_next = 0.0
 
         # live fault injection: name -> None (until cleared) or expiry time
         self.inj = {}
@@ -549,7 +757,7 @@ class B100:
             self.set_inj("gen-lost", self.fault_duration)
 
         powered = bool(self.transistors)
-        gen_lost = self._generator_lost(powered)
+        gen_lost = self._generator_lost(powered)   # latches; call once per step
 
         if not powered:
             phase = "off"
@@ -558,6 +766,9 @@ class B100:
             self.gen_c = lag(self.gen_c, AMBIENT_C, dt, 70.0)
             self.flt_time_s = FLT_TIME_NOMINAL_S
             self.normal_entered = False
+            self.bus_v = lag(self.bus_v, 0.0, dt, 2.0)
+            self.gen_w = lag(self.gen_w, 0.0, dt, 1.0)
+            self.batt_c = lag(self.batt_c, AMBIENT_C, dt, 120.0)
         elif gen_lost:
             # engine down, flying on the battery reserve; the forced-landing
             # clock is however many seconds of reserve are left
@@ -567,6 +778,9 @@ class B100:
             self.gen_c = lag(self.gen_c, AMBIENT_C, dt, 80.0)
             self.reserve_s = max(0.0, self.reserve_s - dt)
             self.flt_time_s = self.reserve_s
+            self.bus_v = lag(self.bus_v, BUS_RESERVE_V, dt, 3.0)
+            self.gen_w = lag(self.gen_w, 0.0, dt, 1.0)
+            self.batt_c = lag(self.batt_c, BATT_RUN_C + 6.0, dt, 60.0)
         else:
             since_on = self.t - self.powered_at
             if since_on < 2.0:
@@ -592,8 +806,135 @@ class B100:
             if self.rpm > IDLE_RPM and not self.reserve_hold:
                 self.reserve_s = min(RESERVE_FULL_S, self.reserve_s + 5.0 * dt)
             self.flt_time_s = FLT_TIME_NOMINAL_S
+            self.bus_v = lag(self.bus_v, BUS_NOMINAL_V, dt, 3.0)
+            self.gen_w = lag(self.gen_w, GEN_FULL_W * min(1.0, load), dt, 2.0)
+            self.batt_c = lag(self.batt_c, BATT_RUN_C, dt, 90.0)
+            if self.rpm > IDLE_RPM:
+                burn = FUEL_BURN_PCT_S * dt * (self.rpm / CRUISE_RPM)
+                self.fuel1_pct = max(0.0, self.fuel1_pct - burn)
+                self.fuel2_pct = max(0.0, self.fuel2_pct - burn)
 
+        self.soc_pct = max(0.0, min(100.0, 100.0 * self.reserve_s / RESERVE_FULL_S))
+        self.phase, self.gen_lost = phase, gen_lost
         self.hyb, self.reason = self._resolve_status(phase, gen_lost)
+        self._step_freja()
+
+    # ------------------------------------------------------- Freja bridge
+
+    def _step_freja(self):
+        """Accept or reject the Freja CAN cycle, the way Receiver does.
+
+        Freja publishes at 10 Hz. A rejected cycle never refreshes the accepted
+        sample, so an integrity or source-id fault ages out to bridge state 2
+        exactly as a silent bus does -- it does not get its own state.
+        """
+        if self.injected("emu-missing"):
+            # "no accepted cycle ever": state 1, which is not just an old one
+            self.freja_accepted = None
+            return
+        if self.t < self.freja_next:
+            return
+        self.freja_next = self.t + 1.0 / FREJA_CAN_HZ
+        if self.injected("emu-stale") or self.injected("gx-fault"):
+            return                              # nothing arrives to accept
+        if self.injected("can-integrity") or self.injected("src-invalid"):
+            self.freja_rejected += 1            # arrives, fails the validator
+            return
+        self.freja_seq = (self.freja_seq + 1) & 0xFF
+        self.freja_accepted = self.t
+
+    def bridge(self):
+        """(bridge state, received_age_ms) as byte 1 and the age field hold."""
+        if self.freja_accepted is None:
+            return BRIDGE_NEVER, AGE_NEVER
+        age = self.t - self.freja_accepted
+        age_ms = min(AGE_MAX, max(0, int(age * 1000.0)))
+        return (BRIDGE_FRESH if age <= FREJA_CAN_TIMEOUT_S else BRIDGE_STALE), age_ms
+
+    def freja(self):
+        """What B100 would put in the two TUNNEL payloads this tick."""
+        bridge, age_ms = self.bridge()
+        powered = bool(self.transistors)
+        engine_running = self.rpm > 500.0
+        gen_online = powered and not self.gen_lost and self.rpm > IDLE_RPM
+        charging = gen_online and not self.reserve_hold and self.reserve_s < RESERVE_FULL_S
+        fuel_low = min(self.fuel1_pct, self.fuel2_pct) < FUEL_LOW_PCT
+        unavail = self.injected("op-unavail")
+        estimated = self.injected("soc-estimated")
+
+        input_flags = IN_RESERVE
+        if powered:
+            input_flags |= IN_BUS | IN_ENGINE | IN_FUEL
+        if gen_online:
+            input_flags |= IN_GEN
+
+        power_flags = (PWR_VBUS if powered else 0) | (PWR_GEN if gen_online else 0)
+        energy_flags = NRG_SOC | NRG_BAT12 | NRG_BAT34
+        if estimated:
+            energy_flags |= NRG_SOC_ESTIMATED
+        propulsion_flags = PRP_FUEL1 | PRP_FUEL2 | (PRP_RPM if powered else 0)
+        thermal_flags = THM_GEN_MOTOR | THM_GEN_CTRL | THM_CHT | THM_BATTERY
+        if unavail:
+            # the spec case that matters: a field whose validity bit is clear
+            # must read as unavailable, never as a measurement of zero
+            energy_flags &= ~NRG_BAT34
+            propulsion_flags &= ~PRP_FUEL2
+            thermal_flags &= ~THM_GEN_CTRL
+
+        pack_v = (BAT_EMPTY_V + (BAT_FULL_V - BAT_EMPTY_V) * self.soc_pct / 100.0
+                  - (BAT_SAG_V if self.gen_lost else 0.0))
+
+        satisfied = 0
+        if self.reserve_s >= RESERVE_NORMAL_S:
+            satisfied |= CRIT_RESERVE
+        if gen_online:
+            satisfied |= CRIT_GEN
+        if engine_running:
+            satisfied |= CRIT_ENGINE
+
+        return {
+            "bridge": bridge,
+            "age_ms": age_ms,
+            "sequence": self.freja_seq,
+            # Freja's own verdict. Only emu-invalid survives a fresh bridge:
+            # every other INVALID reason here is a bridge fault, and those
+            # publish reason 0 under bridge state 1 or 2 instead.
+            "status": int(self.forced.get("HYBSTAT", self.hyb)),
+            "reason": int(self.forced.get("HYBREASON", self.reason)),
+            "input_flags": input_flags,
+            "status_flags": ((ST_ENGINE_RUN if engine_running else 0)
+                             | (ST_GEN_ONLINE if gen_online else 0)
+                             | (ST_CHARGING if charging else 0)
+                             | (ST_FUEL_LOW if fuel_low else 0)),
+            "reserve_s": self.reserve_s,
+            "model_revision": FREJA_MODEL_REVISION,
+            "reserve_flags": ((RSV_ESTIMATED if estimated else 0)
+                              | (RSV_LOW if self.reserve_s < RESERVE_LOW_S else 0)
+                              | (RSV_CRITICAL
+                                 if self.reserve_s < RESERVE_CRITICAL_S else 0)),
+            "implemented_flags": CRIT_IMPLEMENTED,
+            "configured_flags": CRIT_CONFIGURED,
+            "satisfied_flags": satisfied,
+            "latch_flags": ((LATCH_GEN_LOST if self.gen_latched else 0)
+                            | (LATCH_RESERVE_LOW
+                               if self.reserve_s < RESERVE_LOW_S else 0)),
+            "power_flags": power_flags,
+            "energy_flags": energy_flags,
+            "propulsion_flags": propulsion_flags,
+            "thermal_flags": thermal_flags,
+            "bus_v": self.bus_v,
+            "gen_w": self.gen_w,
+            "soc_pct": self.soc_pct,
+            "bat12_v": pack_v,
+            "bat34_v": pack_v - 0.4,    # the two pairs never read identically
+            "rpm": self.rpm,
+            "fuel1_pct": self.fuel1_pct,
+            "fuel2_pct": self.fuel2_pct,
+            "gen_motor_c": self.gen_c,
+            "gen_ctrl_c": max(AMBIENT_C, self.gen_c - 6.0),
+            "cht_c": self.eng_c,
+            "batt_c": self.batt_c,
+        }
 
     def _generator_lost(self, powered):
         """Debounced, in-flight-latched generator loss.
@@ -783,7 +1124,19 @@ class B100:
                    reason, RSN_NAMES.get(reason, "?"),
                    " (pinned)" if "HYBREASON" in self.forced else "",
                    self.reserve_s, int(self.armed),
-                   "  latched" if self.gen_latched else ""))
+                   "  latched" if self.gen_latched else "")
+                + self._bridge_summary())
+
+    def _bridge_summary(self):
+        """What the TUNNEL byte 1 and age field say, which is a separate story
+        from the EMU status: a fresh bridge can still carry INVALID."""
+        if not self.hybrid:
+            return ""
+        bridge, age_ms = self.bridge()
+        return ("\n    tunnel: bridge=%d %s age=%s seq=%d rejected=%d"
+                % (bridge, BRIDGE_NAMES[bridge],
+                   "never" if age_ms == AGE_NEVER else "%dms" % age_ms,
+                   self.freja_seq, self.freja_rejected))
 
 
 # ------------------------------------------------------------------- console
@@ -798,13 +1151,22 @@ ALL_FIELDS = frozenset(NORMAL_1HZ + VERBOSE_1HZ + CLAW_5HZ + CAN_10S_NORMAL
 INJECTIONS = {
     "boot":          (5.0,  "EMU boot -> HYBSTAT 0 UNKNOWN"),
     "gen-lost":      (None, "generator output lost -> 7, or 9 once reserve < 90 s"),
-    "emu-invalid":   (None, "EMU declares invalid -> 10 reason 1"),
-    "emu-stale":     (None, "no EMU status within the CAN timeout -> 10 reason 2"),
-    "emu-missing":   (None, "no EMU status ever received -> 10 reason 3"),
-    "can-integrity": (None, "CAN counter/CRC check fails -> 10 reason 4"),
-    "gx-fault":      (None, "Gx cannot bridge status -> 10 reason 5"),
-    "src-invalid":   (None, "source id does not match the EMU -> 10 reason 7"),
-    "mav-stale":     (5.0,  "stop publishing the hybrid fields entirely"),
+    "emu-invalid":   (None, "EMU declares invalid -> 10 reason 1; the bridge "
+                            "itself stays fresh (state 0)"),
+    "emu-stale":     (None, "no EMU status within the CAN timeout -> 10 reason 2, "
+                            "bridge state 2 after 500 ms"),
+    "emu-missing":   (None, "no EMU status ever received -> 10 reason 3, "
+                            "bridge state 1 and age 0xFFFF"),
+    "can-integrity": (None, "CAN counter/CRC check fails -> 10 reason 4; frames "
+                            "are rejected, so the bridge ages out to state 2"),
+    "gx-fault":      (None, "Gx cannot bridge status -> 10 reason 5, bridge state 2"),
+    "src-invalid":   (None, "source id does not match the EMU -> 10 reason 7; "
+                            "rejected like can-integrity, bridge state 2"),
+    "op-unavail":    (None, "clear Freja validity bits for fuel 2, battery 3/4 and "
+                            "the generator controller -> 0xFF/0xFFFF in 0x8002"),
+    "soc-estimated": (None, "SOC is estimated, not measured -> energy flag bit 1"),
+    "mav-stale":     (5.0,  "stop publishing hybrid data entirely -- both TUNNEL "
+                            "payloads and the NAMED_VALUE block"),
     "cube-loss":     (None, "no Cube heartbeat on UART7 -> CUBEHBTO 1"),
     "parse-timeout": (None, "bytes arrive but do not parse -> MVPARSETO 1"),
     "claw-stale":    (None, "claw data stops updating -> CLAWLDKG/CLAWSTAT -999"),
@@ -821,6 +1183,7 @@ HELP = """commands (one per line, or several separated by ';')
                             ('auto' follows the Cube heartbeat again)
   reserve <seconds>         set BATTRSV and hold it there
   hyb <0-10> [reason]       pin HYBSTAT (and HYBREASON)
+  tunnel                    hex-dump the two TUNNEL payloads as they go out
   force <FIELD> <value>     pin any published field, e.g. force CLAWSTAT -999
   clear [FIELD|all]         drop pinned values and injections
   inject <name> [seconds]   feed a stimulus; omit seconds to hold it
@@ -916,12 +1279,44 @@ SCENARIOS = {
             (18.0, "say CAN integrity failure: expect 10 reason 4"),
             (18.0, "inject can-integrity 5"), (19.0, "status"),
         ]),
+    "freja-bridge": (
+        "TUNNEL bridge states 1 -> 0 -> 2, and rejected frames", [
+            (0.0, "clear all"), (0.0, "power on"),
+            (0.0, "say no CAN cycle accepted yet: expect bridge state 1, "
+                  "status 10, reason 0, age 0xFFFF"),
+            (0.0, "inject emu-missing 6"),
+            (3.0, "tunnel"), (3.0, "status"),
+            (7.0, "say cycles accepted again: expect bridge 0 and a live status"),
+            (8.0, "tunnel"), (8.0, "status"),
+            (12.0, "say CAN goes silent: bridge 0 holds for 500 ms, then state 2"),
+            (12.0, "inject emu-stale 6"),
+            (12.4, "status"), (13.5, "tunnel"), (13.5, "status"),
+            (19.0, "say integrity failures are frames that arrive and are "
+                   "rejected; a rejected frame never refreshes the sample, so "
+                   "this also ages out to state 2"),
+            (19.0, "inject can-integrity 5"), (20.5, "status"),
+            (25.0, "clear all"),
+        ]),
+    "op-unavail": (
+        "operator fields read unavailable, not zero", [
+            (0.0, "clear all"), (0.0, "power on"),
+            (12.0, "tunnel"),
+            (12.0, "say fuel 2, battery 3/4 and the generator controller "
+                   "temperature drop their validity bits: expect 0xFF, not 0"),
+            (12.0, "inject op-unavail 10"),
+            (14.0, "tunnel"),
+            (23.0, "say SOC now flagged estimated rather than measured"),
+            (23.0, "inject soc-estimated 6"), (24.0, "tunnel"),
+            (30.0, "clear all"),
+        ]),
     "stale-link": (
         "hybrid publication stops (HST-AP-015, HST-CU-012)", [
             (0.0, "clear all"), (0.0, "power on"),
             (12.0, "status"),
-            (12.0, "say hybrid fields stop for 6 s: the GCS must show "
-                   "stale/lost, not the last NORMAL"),
+            (12.0, "say hybrid publication stops for 6 s: the CU's own "
+                   "missing-message timeout must show stale/lost, not the "
+                   "last NORMAL -- bridge state cannot help here, because "
+                   "nothing is arriving to carry it"),
             (12.0, "inject mav-stale 6"),
             (19.0, "say publication resumed"), (19.0, "status"),
         ]),
@@ -1076,6 +1471,8 @@ class Console:
                 b.can_last_event = 2
                 b.can_lec = 4
                 self._ok(quiet, "CANBO=%d" % b.can_bus_off)
+            elif cmd == "tunnel":
+                self._tunnel()
             elif cmd == "scenario":
                 self._scenario(args)
             elif cmd in ("quit", "exit"):
@@ -1084,6 +1481,20 @@ class Console:
                 self.log("  ! unknown command %r -- try 'help'" % line)
         except (IndexError, KeyError, ValueError) as err:
             self.log("  ! bad command %r (%s)" % (line, err))
+
+    def _tunnel(self):
+        """Hex-dump both payloads, so a wire capture can be checked by eye
+        against the byte tables in FREJA_MAVLINK_TUNNEL_V1.md."""
+        if not self.b100.hybrid:
+            self.log("  ! not a hybrid airframe: no TUNNEL is published")
+            return
+        snapshot = self.b100.freja()
+        tick = int(self.b100.t * 1000.0) & 0xFFFFFFFF
+        for payload_type, length, encode in TUNNEL_PAYLOADS:
+            body = encode(snapshot, tick)[:length]
+            self.log("  TUNNEL type=0x%04X len=%2d  %s"
+                     % (payload_type, length,
+                        " ".join("%02X" % byte for byte in body)))
 
     def _scenario(self, args):
         if not args or args[0] == "list":
@@ -1121,6 +1532,60 @@ def sweep_values(t, period):
     for name, choices in SWEEP_ENUMS:
         out[name] = choices[int(t) % len(choices)]
     return out
+
+
+def sweep_freja(t, period):
+    """--mode sweep: ramp the TUNNEL payload fields and cycle the bridge state.
+
+    The ranged values share the sweep period with the NAMED_VALUE ramps; the
+    bridge cycles slower, so a decoder has time to settle on each state and
+    show that 1 and 2 blank the readings rather than freezing them.
+    """
+    def tri(phase, lo, hi):
+        x = math.fmod(t / period + phase, 1.0)
+        return lo + (hi - lo) * (2.0 * x if x < 0.5 else 2.0 * (1.0 - x))
+
+    bridge = (BRIDGE_FRESH, BRIDGE_FRESH, BRIDGE_FRESH,
+              BRIDGE_NEVER, BRIDGE_STALE)[int(t / 2.0) % 5]
+    if bridge == BRIDGE_NEVER:
+        age_ms = AGE_NEVER
+    elif bridge == BRIDGE_STALE:
+        age_ms = int(tri(0.3, FREJA_CAN_TIMEOUT_S * 1000.0 + 1, AGE_MAX))
+    else:
+        age_ms = int(tri(0.3, 0, FREJA_CAN_TIMEOUT_S * 1000.0))
+    full = 0xFF
+    return {
+        "bridge": bridge,
+        "age_ms": age_ms,
+        "sequence": int(t) & 0xFF,
+        "status": int(t) % (HYB_INVALID + 1),
+        "reason": int(t) % (FREJA_REASON_MAX + 1),
+        # every bit the validator permits, so a decoder's flag rendering is
+        # exercised as well as its scalars
+        "input_flags": int(t * 2.0) % 0x80,
+        "status_flags": int(t * 2.0) % 0x20,
+        "reserve_s": tri(0.0, 0.0, RESERVE_FULL_S),
+        "model_revision": FREJA_MODEL_REVISION,
+        "reserve_flags": int(t) % 0x40,
+        "implemented_flags": CRIT_IMPLEMENTED,
+        "configured_flags": CRIT_CONFIGURED,
+        "satisfied_flags": int(t) % 0x10,
+        "latch_flags": int(t) % 0x08,
+        "power_flags": full, "energy_flags": full,
+        "propulsion_flags": full, "thermal_flags": full,
+        "bus_v": tri(0.1, 0.0, 60.0),
+        "gen_w": tri(0.2, 0.0, GEN_FULL_W),
+        "soc_pct": tri(0.3, 0.0, 100.0),
+        "bat12_v": tri(0.4, 0.0, 60.0),
+        "bat34_v": tri(0.5, 0.0, 60.0),
+        "rpm": tri(0.0, 0.0, 8000.0),
+        "fuel1_pct": tri(0.6, 0.0, 100.0),
+        "fuel2_pct": tri(0.7, 0.0, 100.0),
+        "gen_motor_c": tri(0.8, 0.0, 150.0),
+        "gen_ctrl_c": tri(0.85, 0.0, 150.0),
+        "cht_c": tri(0.9, 0.0, 150.0),
+        "batt_c": tri(0.95, 0.0, 80.0),
+    }
 
 
 def connect_with_retry(connect, sysid, compid, timeout):
@@ -1170,15 +1635,28 @@ def main():
                          "and publishes the B100 catalog only; griff-hybrid adds "
                          "the engine/generator block and the HybridStatus state "
                          "machine (default: %(default)s)")
+    ap.add_argument("--hybrid-transport", choices=("tunnel", "nval", "both"),
+                    default="tunnel",
+                    help="how hybrid data leaves the board: 'tunnel' is the two "
+                         "private TUNNEL payloads the shipping firmware sends, "
+                         "'nval' the older Griff_Hybrid_Telemetry NAMED_VALUE "
+                         "block, 'both' for migrating a GCS between them "
+                         "(default: %(default)s)")
+    ap.add_argument("--tunnel-rate", type=float, default=TUNNEL_PUBLISH_HZ,
+                    help="TUNNEL publication rate in Hz; the firmware's "
+                         "FrejaTunnelTimer is 200 ms (default: %(default)s)")
     ap.add_argument("--hybrid-rate", type=float, default=HYB_PUBLISH_HZ,
-                    help="hybrid block downlink rate in Hz (default: %(default)s; "
-                         "the onboard ICD rate is 10, which is too fast for a GCS link)")
+                    help="NAMED_VALUE hybrid block downlink rate in Hz "
+                         "(default: %(default)s; the onboard ICD rate is 10, "
+                         "which is too fast for a GCS link)")
     ap.add_argument("--minimal", action="store_true",
-                    help="publish only the 8 instrument-tray values (the hybrid "
-                         "block plus PWRSTAT) and nothing else; same footprint as "
-                         "the original injector")
+                    help="cut the NAMED_VALUE traffic to the instrument-tray "
+                         "values only -- PWRSTAT, plus the hybrid block if "
+                         "--hybrid-transport sends it; the TUNNEL pair rides its "
+                         "own timer in the firmware, so it is unaffected")
     ap.add_argument("--no-hybrid", action="store_true",
-                    help="omit the engine/hybrid fields (they are not B100 fields)")
+                    help="omit the hybrid side entirely: no TUNNEL payloads and "
+                         "no engine/hybrid NAMED_VALUE fields")
     ap.add_argument("--all-float", action="store_true",
                     help="send every value as NAMED_VALUE_FLOAT, as the real board does")
     ap.add_argument("--reserve", type=float, default=RESERVE_FULL_S,
@@ -1216,6 +1694,17 @@ def main():
                              args.connect_timeout)
     print("B100 sim: %s, sys %u comp %u on %s, mode=%s"
           % (args.airframe, args.sysid, args.compid, args.connect, args.mode))
+    hybrid_on = (args.airframe == "griff-hybrid") and not args.no_hybrid
+    nval_on = hybrid_on and args.hybrid_transport in ("nval", "both")
+    tunnel_on = hybrid_on and args.hybrid_transport in ("tunnel", "both")
+    if hybrid_on:
+        print("hybrid data: %s"
+              % ", ".join(
+                  (["TUNNEL 0x%04X/0x%04X at %gHz"
+                    % (TUNNEL_HYBRID_TYPE, TUNNEL_OPERATOR_TYPE, args.tunnel_rate)]
+                   if tunnel_on else [])
+                  + (["NAMED_VALUE hybrid block at %gHz" % args.hybrid_rate]
+                     if nval_on else [])))
     if args.mode == "sim" and not args.power_on:
         print("waiting for MAV_CMD 6200 param1=1 (Main Power ON) -- %s"
               % ("engine off until then" if args.airframe == "griff-hybrid"
@@ -1225,7 +1714,7 @@ def main():
 
     b100 = B100(faults=args.faults, fault_after=args.fault_after,
                 fault_duration=args.fault_duration,
-                hybrid=(args.airframe == "griff-hybrid") and not args.no_hybrid,
+                hybrid=hybrid_on,
                 reserve_s=args.reserve)
     b100.verbose = args.verbose_nval
     if args.power_on:
@@ -1240,6 +1729,17 @@ def main():
         else:
             mav.mav.named_value_float_send(boot_ms, key, float(value))
 
+    def send_tunnel(snapshot):
+        """Both payloads, broadcast to 0/0 as the firmware sends them.
+
+        target_system/target_component stay 0 until the CU's MAVLink address is
+        assigned, which is also what makes the autopilot forward them on to
+        every link rather than consuming them.
+        """
+        for payload_type, length, encode in TUNNEL_PAYLOADS:
+            mav.mav.tunnel_send(0, 0, payload_type, length,
+                                encode(snapshot, boot_ms))
+
     console = Console(b100, enabled=not args.no_console)
     for line in args.script:
         console.execute(line)
@@ -1249,6 +1749,7 @@ def main():
     prev = start
     boot_ms = 0
     due_1hz = due_can = due_ver = due_hyb = due_claw = due_hb = due_log = 0.0
+    due_tunnel = 0.0
 
     while True:
         cycle_start = time.time()
@@ -1293,12 +1794,16 @@ def main():
             values.update(b100.forced)
             for name in values:
                 send(name, values[name])
+            if tunnel_on and now >= due_tunnel:
+                due_tunnel = now + 1.0 / args.tunnel_rate
+                send_tunnel(sweep_freja(now, args.period))
         else:
             values = b100.values()
             if args.minimal:
                 if now >= due_hyb:
                     due_hyb = now + 1.0 / args.hybrid_rate
-                    for name in HYBRID_FIELDS + ("PWRSTAT",):
+                    fields = HYBRID_FIELDS + ("PWRSTAT",) if nval_on else ("PWRSTAT",)
+                    for name in fields:
                         send(name, values[name])
                 _publish_done = True
             else:
@@ -1316,7 +1821,7 @@ def main():
                         send(name, values[name])
             # 10 Hz per GRIFF-HYB-ICD-001 s6; "mav-stale" stops it entirely so
             # that the receiver's own staleness timeout can be demonstrated
-            if (not _publish_done and now >= due_hyb and b100.hybrid
+            if (not _publish_done and now >= due_hyb and nval_on
                     and not b100.injected("mav-stale")):
                 due_hyb = now + 1.0 / args.hybrid_rate
                 for name in HYBRID_FIELDS:
@@ -1333,6 +1838,14 @@ def main():
                 for name in VERSION_60S:
                     send(name, values[name])
 
+        # The firmware's FrejaTunnelTimer is independent of the NAMED_VALUE
+        # schedule, so this is not gated by --minimal. "mav-stale" stops it, to
+        # exercise the CU's own missing-message timeout.
+        if (args.mode == "sim" and tunnel_on and now >= due_tunnel
+                and not b100.injected("mav-stale")):
+            due_tunnel = now + 1.0 / args.tunnel_rate
+            send_tunnel(b100.freja())
+
         if args.heartbeat and now >= due_hb:
             due_hb = now + 1.0
             mav.mav.heartbeat_send(mav1.MAV_TYPE_GENERIC, mav1.MAV_AUTOPILOT_INVALID,
@@ -1343,8 +1856,10 @@ def main():
             pinned = ("  [pinned: %s]" % ",".join(sorted(b100.forced))
                       if b100.forced else "")
             if b100.hybrid:
+                bridge, age_ms = b100.bridge()
                 print("t=%6.1f  PWRSTAT=%d GFSTATE=%03d HYB=%d %-26s rpm=%5.0f "
-                      "rsv=%5.0fs fltT=%5.0fs claw=%6.1fkg cmds=%d%s"
+                      "rsv=%5.0fs fltT=%5.0fs claw=%6.1fkg brg=%d/%s "
+                      "cmds=%d%s"
                       % (now, values["PWRSTAT"], values["GFSTATE"],
                          values["HYBSTAT"],
                          HYB_NAMES.get(values["HYBSTAT"], "?")
@@ -1352,6 +1867,8 @@ def main():
                             if values["HYBREASON"] else ""),
                          values["ENGRPM"], values["BATTRSV"],
                          values["HYBFLTIME"], values["CLAWLDKG"],
+                         bridge,
+                         "never" if age_ms == AGE_NEVER else "%dms" % age_ms,
                          values["GFCMDCNT"], pinned))
             else:
                 print("t=%6.1f  PWRSTAT=%d GFSTATE=%03d nav=%d pld=%d "

@@ -18,7 +18,8 @@ so no manual param set or restart is needed. `--no-griff-b100` suppresses the
 simulator; `--griff-b100-args` passes extra arguments through.
 
 Griff30 is all-electric and publishes the B100 catalog only. Griff-Hybrid adds
-the engine/generator block and the HybridStatus state machine.
+the engine/generator block, the HybridStatus state machine, and the two MAVLink
+`TUNNEL` payloads the board uses to carry Freja's telemetry.
 
 On Griff-Hybrid, `MAV_CMD 6200 param1=1` (main power ON) runs the engine up
 through `READY` and `STARTING` to `NORMAL`. That trigger is a simulator
@@ -49,12 +50,24 @@ means "the B100 is not on this link", not "the command is wrong".
 
 In MAVProxy: `set target_component 25`, then `long 6200 1`.
 
-Two sources of truth, and they are not the same maturity:
+Three sources of truth, and they are not the same maturity:
 
 | Family | Spec | Status |
 | --- | --- | --- |
 | B100 payload/power board | `G135-B100-2022/docs/MavlinkNamedValueFloatFields.md` | shipping firmware |
-| Hybrid / EMU | `Griff_Hybrid_Telemetry_Draft/GRIFF-HYB-{ICD,SM,VER}-001` | Draft 0.1 |
+| Freja hybrid over `TUNNEL` | `G135-B100-2022/docs/FREJA_MAVLINK_TUNNEL_V1.md` | shipping firmware |
+| Hybrid / EMU state machine | `Griff_Hybrid_Telemetry_Draft/GRIFF-HYB-{ICD,SM,VER}-001` | Draft 0.1 |
+
+The middle row is how hybrid data actually leaves the board, so it is what the
+simulator publishes by default. The `HYBSTAT`/`HYBREASON`/`ENGRPM` NAMED_VALUE
+block from the bottom row is *not* in B100 firmware and never was; it is kept
+behind `--hybrid-transport` for the GCS code that still reads it:
+
+| `--hybrid-transport` | Publishes |
+| --- | --- |
+| `tunnel` (default) | `TUNNEL` 0x8001 + 0x8002 at 5 Hz |
+| `nval` | the Draft 0.1 NAMED_VALUE hybrid block at 10 Hz |
+| `both` | both, for migrating a GCS from one to the other |
 
 ## Debugging ACKs when GGC says nothing came back
 
@@ -85,7 +98,59 @@ To see it from GGC's own side, start it with the command-queue log enabled:
 `handleCommandAck Ack not in list` means the ACK arrived and was dropped on the
 component mismatch. No line at all means it never arrived.
 
+## Hybrid data over MAVLink TUNNEL (FREJA_MAVLINK_TUNNEL_V1)
+
+B100 reads Freja's telemetry off CAN and republishes it on UART7 as two private
+`TUNNEL` payloads every 200 ms, broadcast to `0/0` from sysid 1 / `MAV_COMP_ID_USER1`
+(25). Broadcast is what makes an unchanged ArduPilot forward them to every link
+rather than consuming them, and it stands until the CU's MAVLink address is
+assigned. Multibyte fields are unsigned **big-endian**; every byte past the
+declared length is zero.
+
+| Type | Length | Carries |
+| --- | --- | --- |
+| `0x8001` | 22 | HybridStatus: status, reason, reserve, criteria and latch flags |
+| `0x8002` | 29 | Operator: bus, generator, SOC, pack voltages, rpm, fuel, temperatures |
+
+Byte 0 is the format version (`1`) and byte 1 is the **bridge state** — B100's own
+view of the CAN link, in its own namespace. It never replaces a Freja ReasonCode:
+
+| State | Meaning | Trigger | What the payload carries |
+| --- | --- | --- | --- |
+| 0 | a cycle was accepted within 500 ms | nominal | Freja's real status and readings |
+| 1 | no cycle has ever been accepted | `inject emu-missing` | status 10, reason 0, age `0xFFFF`, sentinels |
+| 2 | the last accepted cycle aged out | `inject emu-stale`, `gx-fault` | status 10, reason 0, real age, sentinels |
+
+A **rejected** frame never refreshes the sample, so an integrity or source-id
+failure (`inject can-integrity`, `inject src-invalid`) ages out to state 2 exactly
+as a silent bus does — it gets no state of its own. States 1 and 2 publish INVALID
+rather than the last plausible reading, which is the entire point of the byte.
+
+Unavailability is per field, not per message: when a validity bit is clear the
+value is written as `0xFF` / `0xFFFF`, never as a measurement of zero. `inject
+op-unavail` clears the bits for fuel 2, battery 3/4 and the generator-controller
+temperature; `inject soc-estimated` marks SOC estimated rather than measured.
+
+The CU is still responsible for its own missing-message timeout: bridge state
+cannot report a message that never arrives. `inject mav-stale` stops publication
+outright to exercise exactly that.
+
+To read the payloads by eye, type `tunnel` at the console — it hex-dumps both as
+they go on the wire, so a capture can be checked against the byte tables in
+`FREJA_MAVLINK_TUNNEL_V1.md`:
+
+    TUNNEL type=0x8001 len=22  01 00 01 01 00 40 00 01 2C 00 01 00 0F 07 01 00 ...
+    TUNNEL type=0x8002 len=29  01 00 01 FF FF FF FF 00 03 E8 6D 6C 0D FF FF 64 ...
+
+`status` prints the bridge state, the accepted-cycle age and the rejected-frame
+count alongside the EMU status, because the two can legitimately disagree: a
+fresh bridge (0) can carry `HYBSTAT=10` when Freja itself declares invalid
+(`inject emu-invalid`), and that is a different fault from a dead bridge.
+
 ## HYBSTAT — hybrid status (GRIFF-HYB-ICD-001 s4)
+
+Carried in `TUNNEL` 0x8001 byte 3, and as the `HYBSTAT` NAMED_VALUE under
+`--hybrid-transport nval|both`.
 
 Resolved by the priority table in GRIFF-HYB-SM-001 s2, not by order of arrival:
 INVALID > EMERGENCY_POWER_ONLY > GENERATOR_LOST > RESERVE_LOW > LAND_SOON >
@@ -111,6 +176,15 @@ releases on `arm off`; NORMAL is entered only above 120 s reserve and left below
 90 s.
 
 ## HYBREASON — reason code (GRIFF-HYB-ICD-001 s5)
+
+Carried in `TUNNEL` 0x8001 byte 4. B100's frame validator accepts reason `0..12`,
+so Freja's own enumeration is wider than the Draft 0.1 set below; 8..12 are
+unnamed here because no document in either repo names them yet.
+
+Codes 2, 3, 4, 5 and 7 are bridge faults. Over `TUNNEL` they appear as a nonzero
+bridge state with reason **0**, not as the reason code — only `emu-invalid`
+(reason 1) reaches the CU as a reason, because only it is Freja's own verdict.
+The reason codes below are what the NAMED_VALUE block reports.
 
 | Code | Name | Trigger |
 | --- | --- | --- |
@@ -144,7 +218,12 @@ Any published field can also be pinned outright with `force <FIELD> <value>`, an
 `scenario <name>` plays a timeline with narration, for repeatable demos:
 
 `nominal`, `gen-loss`, `transient`, `latch`, `reserve-low`, `priority`,
-`invalid`, `stale-link`, `all-states`, `b100-faults`.
+`invalid`, `freja-bridge`, `op-unavail`, `stale-link`, `all-states`,
+`b100-faults`.
+
+`freja-bridge` walks the `TUNNEL` bridge state through 1 → 0 → 2 and then through
+the rejected-frame path, dumping the payloads at each step. `op-unavail` shows
+fields going unavailable rather than reading zero.
 
 They are scriptable too — stdin is read line by line:
 
