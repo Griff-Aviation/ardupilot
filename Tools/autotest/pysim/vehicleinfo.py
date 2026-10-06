@@ -98,13 +98,13 @@ class VehicleInfo(object):
             # Selecting one of these also starts the B100 payload/power
             # simulator, unless --no-griff-b100 is given.
             "Griff30": {
-                "model": "X",
+                "model": "X:@ROMFS/models/griff-60v.json",
                 "waf_target": "bin/arducopter",
                 "default_params_filename": ["default_params/copter.parm",
                                             "default_params/griff30.parm" ],
             },
             "Griff-Hybrid": {
-                "model": "X",
+                "model": "X:@ROMFS/models/griff-60v.json",
                 "waf_target": "bin/arducopter",
                 "default_params_filename": ["default_params/copter.parm",
                                             "default_params/griff-hybrid.parm" ],

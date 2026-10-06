@@ -69,6 +69,39 @@ behind `--hybrid-transport` for the GCS code that still reads it:
 | `nval` | the Draft 0.1 NAMED_VALUE hybrid block at 10 Hz |
 | `both` | both, for migrating a GCS from one to the other |
 
+## Batteries
+
+Both Griff frames boot with two 60 V packs on one bus, from
+`default_params/griff*.parm` plus the frame model `models/griff-60v.json`.
+
+The 60 V has to come from the **frame model**, not from `SIM_BATT_VOLTAGE`.
+SITL scales motor thrust by `voltage / maxVoltage` (`SIM_Motor.cpp`
+`calculate_forces`), where `maxVoltage` is the frame's, 12.6 V by default. Set
+`SIM_BATT_VOLTAGE 60` on its own and every motor gets ~4.8x the outflow
+velocity: the aircraft ignores its takeoff target and climbs away at an
+accelerating rate, past 5 km and still going. `griff-60v.json` moves
+`maxVoltage` and `refVoltage` to 60 so the ratio stays 1.0, and `Frame::init`
+then defaults `SIM_BATT_VOLTAGE` to 60 by itself. Nothing else is overridden,
+so the dynamics are the stock X quad and hover draw is unchanged at ~29 A --
+now at 60 V rather than 12.09 V.
+
+SITL has one battery model and derives battery 2 from it as a flat 25% at the
+ADC pins, so battery 2 is given pins 14/15 and 4x multipliers
+(`BATT2_VOLT_MULT 40.4`, `BATT2_AMP_PERVLT 34.0`) to read the same pack back.
+`BATT_AMP_PERVLT` is halved to 8.5 so the hover draw is split between the packs
+rather than counted twice: each reports ~14.6 A and `BATTERY_STATUS` 0 and 1
+both show 60.0 V.
+
+Raising `SIM_BATT_VOLTAGE` by hand re-introduces the runaway, because the frame
+model's `maxVoltage` does not follow it. To fly a different pack voltage, edit
+`models/griff-60v.json` and keep the two fields equal. `SIM_BATT_CAP_AH` and
+`BATT_CAPACITY` are left at their stock values; set them to the real pack size
+if a percentage remaining or a capacity failsafe matters.
+
+These are the autopilot's own monitors. The pack voltages the B100 simulator
+publishes in `TUNNEL` 0x8002 (`bat12_v`, `bat34_v`) are Freja's measurements on
+its own scale (45.0-54.6 V) and are not connected to the SITL batteries.
+
 ## Debugging ACKs when GGC says nothing came back
 
 GGC files a command under the component it addressed, but matches the ACK on the

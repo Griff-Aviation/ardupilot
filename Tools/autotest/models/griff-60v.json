@@ -1,0 +1,20 @@
+# Griff 60 V pack, flown on the stock SITL X-quad airframe.
+#
+# SITL scales motor thrust by (battery voltage / frame maxVoltage) in
+# SIM_Motor.cpp calculate_forces(). Raising SIM_BATT_VOLTAGE on its own
+# therefore multiplies thrust rather than just changing a reading, and the
+# aircraft climbs away. This model moves maxVoltage with it so the ratio
+# stays 1.0.
+#
+# Only the voltage pair is overridden; every other field keeps its default
+# from Frame::default_model, so the flight dynamics are the stock X quad.
+# Hover thrust and hover current are unchanged -- refCurrent is held at the
+# default, so hover draw stays ~29.3 A, now at 60 V.
+
+{
+    # nominal pack voltage in the hover reference condition
+    "refVoltage" : 60.0,
+
+    # full battery voltage; must track refVoltage or thrust is rescaled
+    "maxVoltage" : 60.0
+}
