@@ -145,6 +145,7 @@ void AC_Loiter::init_target()
     _predicted_euler_angle_rad.x = _pos_control.get_roll_rad();
     _predicted_euler_angle_rad.y = _pos_control.get_pitch_rad();
     _brake_accel_cmss = 0.0f;
+    _pilot_accel_ne_cmss.zero();
 }
 
 /// reduce response for landing
