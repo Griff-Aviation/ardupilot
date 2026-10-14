@@ -76,6 +76,12 @@ protected:
     ///		updated velocity sent directly to position controller
     void calc_desired_velocity(bool avoidance_on = true);
 
+    // Maximum pilot acceleration from the lean angle and LOIT_ACC_MAX, in cm/s/s.
+    float get_pilot_accel_max_cmss() const;
+
+    // Limit pilot acceleration and braking, with separate braking and pilot jerk limits.
+    Vector2f limit_pilot_accel_NE_cmss(const Vector2f& request_ne_cmss, float dt);
+
     // references and pointers to external libraries
     const AP_AHRS_View&     _ahrs;
     AC_PosControl&          _pos_control;
@@ -87,8 +93,9 @@ protected:
     AP_Float    _accel_max_ne_cmss;     // loiter's max acceleration in cm/s/s
     AP_Float    _brake_accel_max_cmss;  // loiter's maximum acceleration during braking in cm/s/s
     AP_Float    _brake_jerk_max_cmsss;  // loiter's maximum jerk during braking in cm/s/s
+    AP_Float    _jerk_max_ne_cmsss;     // pilot jerk in cm/s/s/s outside braking; zero disables
     AP_Float    _brake_delay_s;         // delay (in seconds) before loiter braking begins after sticks are released
-    AP_Float    _speed_terminal_ne_cms; // horizontal terminal speed in cm/s at LOIT_ANG_MAX
+    AP_Float    _speed_terminal_ne_cms; // horizontal terminal speed in cm/s at maximum pilot acceleration
 
     // loiter controller internal variables
     Vector2f    _desired_accel_ne_cmss;     // slewed pilot's desired acceleration in lat/lon frame
@@ -97,4 +104,6 @@ protected:
     Vector2f    _predicted_euler_rate;      // predicted roll/pitch rates in radians/sec based on pilot's desired acceleration
     uint32_t    _brake_timer_ms;            // system time that brake was initiated
     float       _brake_accel_cmss;          // acceleration due to braking from previous iteration (used for jerk limiting)
+    Vector2f    _pilot_accel_ne_cmss;       // pilot acceleration after acceleration, braking and jerk limits
+    uint32_t    _pilot_accel_update_ms;     // last pilot acceleration update, for stale-state reset
 };
