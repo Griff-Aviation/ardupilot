@@ -352,7 +352,28 @@ Vector2f AC_Loiter::limit_pilot_accel_NE_cmss(const Vector2f& request_ne_cmss, f
             cross_delta_ne_cmss.limit_length(pilot_jerk_cmsss * dt);
         }
 
-        _pilot_accel_ne_cmss = vel_unit_ne * new_along_cmss + accel_cross_ne_cmss + cross_delta_ne_cmss;
+        Vector2f new_accel_ne_cmss = vel_unit_ne * new_along_cmss + accel_cross_ne_cmss + cross_delta_ne_cmss;
+        if (is_positive(_accel_max_ne_cmss)) {
+            // Independent slews can combine a slowly fading brake with a fast cross-track request
+            // outside ACC_MAX. Allocate the available magnitude before recombining; scaling the
+            // final vector would also scale the retained brake and could exceed its jerk limit.
+            // If ACC_MAX was lowered below the current state, preserve jerk-limited recovery:
+            // allow the existing magnitude, but never increase it.
+            const float accel_limit_cmss = MAX(_accel_max_ne_cmss.get(), _pilot_accel_ne_cmss.length());
+            if (new_accel_ne_cmss.length_squared() > sq(accel_limit_cmss)) {
+                // Keep the current cross-track acceleration feasible while applying the along-track
+                // slew. This only shortens that slew; it never demands a faster brake transition.
+                const float along_limit_cmss = safe_sqrt(sq(accel_limit_cmss) - accel_cross_ne_cmss.length_squared());
+                new_along_cmss = constrain_float(new_along_cmss, -along_limit_cmss, along_limit_cmss);
+                // The remaining cross-track limit still contains the old cross-track state. Limiting
+                // the new cross-track state to it therefore cannot increase the cross-track jerk.
+                const float cross_limit_cmss = safe_sqrt(sq(accel_limit_cmss) - sq(new_along_cmss));
+                Vector2f new_cross_ne_cmss = accel_cross_ne_cmss + cross_delta_ne_cmss;
+                new_cross_ne_cmss.limit_length(cross_limit_cmss);
+                new_accel_ne_cmss = vel_unit_ne * new_along_cmss + new_cross_ne_cmss;
+            }
+        }
+        _pilot_accel_ne_cmss = new_accel_ne_cmss;
         _pilot_accel_braking = is_negative(new_along_cmss);
     } else {
         // too slow for a direction of travel: nothing is braking
