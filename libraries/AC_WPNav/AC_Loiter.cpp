@@ -90,6 +90,15 @@ const AP_Param::GroupInfo AC_Loiter::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("JERK", 12, AC_Loiter, _jerk_max_ne_cmsss, 0.0f),
 
+    // @Param: STOP_JERK
+    // @DisplayName: Loiter stop jerk
+    // @Description: Loiter jerk in cm/s/s/s with which braking finishes when the vehicle comes to rest after the stick is centered. Braking still builds at LOIT_BRK_JERK; it is then held, up to LOIT_BRK_ACCEL, until the speed is low enough for a ramp at this jerk to reach zero braking at zero speed. Higher values end the stop more crisply. Values no higher than 100 times PSC_JERK_XY are recommended; PSC_JERK_XY is in m/s/s/s while this parameter is in cm/s/s/s. Set to zero to keep the default stop, whose last part decays exponentially at a rate set by PSC_VELXY_P.
+    // @Units: cm/s/s/s
+    // @Range: 0 2000
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("STOP_JERK", 13, AC_Loiter, _stop_jerk_max_cmsss, 0.0f),
+
     AP_GROUPEND
 };
 
@@ -363,17 +372,35 @@ void AC_Loiter::calc_desired_velocity(bool avoidance_on)
 
         // calculate a braking acceleration if sticks are at zero
         float loiter_brake_accel = 0.0f;
-        // The raw stick request resets this timer in set_pilot_desired_acceleration_rad().
-        // Wait at least one full loop after release, including when BRK_DELAY is zero.
+        const bool jerk_shaped_stop = is_positive(_stop_jerk_max_cmsss);
+        bool stopping = false;
         if ((AP_HAL::millis() - _brake_timer_ms) > MAX(_brake_delay_s, dt) * 1000.0f) {
-            float brake_gain = _pos_control.get_vel_NE_pid().kP() * 0.5f;
-            loiter_brake_accel = constrain_float(sqrt_controller(desired_speed, brake_gain, _brake_jerk_max_cmsss, dt), 0.0f, _brake_accel_max_cmss);
+            if (jerk_shaped_stop) {
+                // hold braking until a ramp at LOIT_STOP_JERK reaches zero braking at zero speed
+                loiter_brake_accel = MIN(safe_sqrt(2.0f * _stop_jerk_max_cmsss * desired_speed), _brake_accel_max_cmss.get());
+                if (is_positive(dt)) {
+                    loiter_brake_accel = MIN(loiter_brake_accel, desired_speed / dt);
+                }
+                stopping = true;
+            } else {
+                const float brake_gain = _pos_control.get_vel_NE_pid().kP() * 0.5f;
+                loiter_brake_accel = constrain_float(sqrt_controller(desired_speed, brake_gain, _brake_jerk_max_cmsss, dt), 0.0f, _brake_accel_max_cmss);
+            }
         }
-        _brake_accel_cmss += constrain_float(loiter_brake_accel - _brake_accel_cmss, -_brake_jerk_max_cmsss * dt, _brake_jerk_max_cmsss * dt);
+
+        // Integrate jerk-limited brake acceleration. Braking builds at LOIT_BRK_JERK; as the vehicle comes to
+        // rest it is released at LOIT_STOP_JERK, while pilot input still removes it at LOIT_BRK_JERK.
+        const float release_jerk_cmsss = stopping ? _stop_jerk_max_cmsss.get() : _brake_jerk_max_cmsss.get();
+        _brake_accel_cmss += constrain_float(loiter_brake_accel - _brake_accel_cmss, -release_jerk_cmsss * dt, _brake_jerk_max_cmsss * dt);
         loiter_accel_brake = desired_vel_norm * _brake_accel_cmss;
 
-        // update the desired velocity using the drag and braking accelerations
+        // Update desired speed based on braking and drag
         desired_speed = MAX(desired_speed - (drag_decel + _brake_accel_cmss) * dt, 0.0f);
+
+        // a jerk-shaped stop has finished: clear any braking left over, so it cannot act against the next stick input
+        if (stopping && is_zero(desired_speed)) {
+            _brake_accel_cmss = 0.0f;
+        }
         desired_vel = desired_vel_norm * desired_speed;
     }
 

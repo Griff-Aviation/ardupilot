@@ -97,6 +97,7 @@ protected:
     AP_Float    _brake_accel_max_cmss;  // loiter's maximum acceleration during braking in cm/s/s
     AP_Float    _brake_jerk_max_cmsss;  // loiter's maximum jerk during braking in cm/s/s
     AP_Float    _jerk_max_ne_cmsss;     // pilot jerk in cm/s/s/s outside braking; zero disables
+    AP_Float    _stop_jerk_max_cmsss;    // jerk in cm/s/s/s at the end of a centred-stick stop; zero keeps the default stop
     AP_Float    _brake_delay_s;         // delay (in seconds) before loiter braking begins after sticks are released
     AP_Float    _speed_terminal_ne_cms; // horizontal terminal speed in cm/s at maximum pilot acceleration
 
