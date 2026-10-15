@@ -31,7 +31,10 @@ public:
     /// set pilot desired acceleration in centidegrees
     void set_pilot_desired_acceleration_cd(float euler_roll_angle_cd, float euler_pitch_angle_cd);
 
-    /// gets pilot desired acceleration in the earth frame
+    /// gets the raw pilot acceleration request before acceleration, braking and jerk limits
+    Vector2f get_pilot_requested_acceleration_NE_cmss() const { return _pilot_requested_accel_ne_cmss; }
+
+    /// gets pilot desired acceleration in the earth frame after pilot acceleration limits
     Vector2f get_pilot_desired_acceleration_NE_cmss() const { return Vector2f{_desired_accel_ne_cmss.x, _desired_accel_ne_cmss.y}; }
 
     /// clear pilot desired acceleration
@@ -98,6 +101,7 @@ protected:
     AP_Float    _speed_terminal_ne_cms; // horizontal terminal speed in cm/s at maximum pilot acceleration
 
     // loiter controller internal variables
+    Vector2f    _pilot_requested_accel_ne_cmss; // raw pilot acceleration request for override detection
     Vector2f    _desired_accel_ne_cmss;     // slewed pilot's desired acceleration in lat/lon frame
     Vector2f    _predicted_accel_ne_cmss;   // predicted acceleration in lat/lon frame based on pilot's desired acceleration
     Vector2f    _predicted_euler_angle_rad; // predicted roll/pitch angles in radians based on pilot's desired acceleration

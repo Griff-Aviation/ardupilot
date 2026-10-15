@@ -46,8 +46,9 @@ bool ModeLoiter::do_precision_loiter()
     if (copter.ap.land_complete_maybe) {
         return false;        // don't move on the ground
     }
-    // if the pilot *really* wants to move the vehicle, let them....
-    if (loiter_nav->get_pilot_desired_acceleration_NE_cmss().length() > 50.0f) {
+    // Check pilot intent before acceleration and jerk limits. Precision Loiter clears
+    // the command each loop, which can keep the limited acceleration below this threshold.
+    if (loiter_nav->get_pilot_requested_acceleration_NE_cmss().length() > 50.0f) {
         return false;
     }
     if (!copter.precland.target_acquired()) {

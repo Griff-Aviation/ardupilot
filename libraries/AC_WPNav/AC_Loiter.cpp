@@ -120,6 +120,7 @@ void AC_Loiter::init_target_cm(const Vector2f& position_ne_cm)
     // initialise desired acceleration and angles to zero to remain on station
     _predicted_accel_ne_cmss.zero();
     _desired_accel_ne_cmss.zero();
+    _pilot_requested_accel_ne_cmss.zero();
     _predicted_euler_angle_rad.zero();
     _brake_accel_cmss = 0.0f;
     _pilot_accel_ne_cmss.zero();
@@ -169,6 +170,8 @@ void AC_Loiter::set_pilot_desired_acceleration_rad(float euler_roll_angle_rad, f
     // convert our desired attitude to an acceleration vector assuming we are not accelerating vertically
     const Vector3f desired_euler_rad {euler_roll_angle_rad, euler_pitch_angle_rad, _ahrs.yaw};
     const Vector2f request_ne_cmss = _pos_control.lean_angles_to_accel_NEU_cmss(desired_euler_rad).xy();
+    // Keep pilot intent separate from the limited command for Precision Loiter override.
+    _pilot_requested_accel_ne_cmss = request_ne_cmss;
 
     // Reset brake timer from the raw stick request, so a jerk-limited ramp-down
     // does not delay the start of braking after the sticks are released.
