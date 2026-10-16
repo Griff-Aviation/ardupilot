@@ -38,7 +38,10 @@ every loss-of-control event satisfies the configured release conditions first.
 
 Release sends COMMAND_LONG command 6220, param1=1, param2–7=0, to the exact learned
 target route. A transaction sends at most three times, 250 ms apart, ending 750 ms
-after the trigger. Missing route or TX space does not count as a successful send.
+after the trigger. A successful send requires a complete frame to enter the UART
+buffer under a nonblocking channel lock. Missing routes, busy/full/suppressed or
+write-locked links and incomplete writes do not count as successful sends or
+request AltHold. MAVLink sequence numbers, CRC and signing are preserved.
 ACK source, command and supplied target extensions must match. ACCEPTED stops
 retries, IN_PROGRESS waits until the same deadline, other results terminate the
 transaction. First-send AltHold failure is recorded and does not stop release retries.

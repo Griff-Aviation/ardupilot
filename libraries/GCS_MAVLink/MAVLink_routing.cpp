@@ -250,12 +250,46 @@ bool MAVLink_routing::send_to_component(uint8_t sysid, uint8_t compid, uint32_t 
             continue;
         }
         GCS_MAVLINK *link = gcs().chan(target_route.channel);
-        if (link == nullptr || !link->check_payload_size(entry->max_msg_len)) {
+        if (link == nullptr) {
             continue;
         }
-        _mav_finalize_message_chan_send(target_route.channel, entry->msgid, pkt,
-                                        entry->min_msg_len, entry->max_msg_len, entry->crc_extra);
-        return true;
+        auto &semaphore = comm_chan_lock(target_route.channel);
+        if (!semaphore.take_nonblocking()) {
+            continue;
+        }
+        bool sent = false;
+        do {
+            AP_HAL::UARTDriver *port = link->get_uart();
+            if (port == nullptr || port->is_write_locked() ||
+                gcs_alternative_active[target_route.channel]) {
+                break;
+            }
+#if HAL_HIGH_LATENCY2_ENABLED
+            if (link->is_high_latency_link && !gcs().get_high_latency_status()) {
+                break;
+            }
+#endif
+            const mavlink_status_t *status = mavlink_get_channel_status(target_route.channel);
+            if (status == nullptr ||
+                ((status->flags & MAVLINK_STATUS_FLAG_OUT_MAVLINK1) && entry->msgid > 255) ||
+                !link->check_payload_size(entry->max_msg_len)) {
+                break;
+            }
+            mavlink_message_t message {};
+            message.msgid = entry->msgid;
+            memcpy(_MAV_PAYLOAD_NON_CONST(&message), pkt, entry->max_msg_len);
+            mavlink_finalize_message_chan(&message, mavlink_system.sysid, mavlink_system.compid,
+                target_route.channel, entry->min_msg_len, entry->max_msg_len, entry->crc_extra);
+            uint8_t frame[MAVLINK_MAX_PACKET_LEN];
+            const uint16_t frame_len = mavlink_msg_to_send_buffer(frame, &message);
+            // A complete frame must enter the UART buffer before reporting a send.
+            // The channel lock covers the space check, sequence/signing and write.
+            sent = port->write(frame, frame_len) == frame_len;
+        } while (false);
+        semaphore.give();
+        if (sent) {
+            return true;
+        }
     }
     return false;
 }

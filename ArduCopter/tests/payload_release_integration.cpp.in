@@ -8,6 +8,7 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 static unsigned checks;
 static void check(bool value, const char *label) {
@@ -33,17 +34,52 @@ template<typename... Args> static void notice(int, const char *fmt, Args... args
 #define GCS_SEND_TEXT(level,...) notice(level,__VA_ARGS__)
 #define HAL_GCS_ENABLED 1
 #define HAL_LOGGING_ENABLED 1
+#define HAL_HIGH_LATENCY2_ENABLED 1
 #define MODE_LOITER_ENABLED 1
 #define FRAME_CONFIG 0
 #define HELI_FRAME 1
 #define AP_MOTORS_MAX_NUM_MOTORS 4
 
-struct Wire { mavlink_channel_t channel; mavlink_message_t message; };
+struct Wire { mavlink_channel_t channel; mavlink_message_t message; std::vector<uint8_t> bytes; };
 static std::vector<Wire> wire;
-static void _mav_finalize_message_chan_send(mavlink_channel_t channel, uint32_t id,
-    const char *pkt,uint8_t,uint8_t length,uint8_t) {
-    Wire frame{}; frame.channel=channel; frame.message.msgid=id; frame.message.len=length;
-    std::memcpy(_MAV_PAYLOAD_NON_CONST(&frame.message),pkt,length); wire.push_back(frame);
+struct FakeSemaphore {
+    bool busy=false,held=false;
+    unsigned tries=0;
+    bool take_nonblocking() {
+        tries++;
+        if (busy || held) return false;
+        held=true; return true;
+    }
+    bool give() { check(held,"sender releases an acquired channel lock"); held=false; return true; }
+};
+static FakeSemaphore channel_locks[4];
+static FakeSemaphore &comm_chan_lock(mavlink_channel_t channel) { return channel_locks[channel]; }
+static bool gcs_alternative_active[4];
+namespace AP_HAL {
+class UARTDriver {
+public:
+    mavlink_channel_t channel=MAVLINK_COMM_0;
+    bool write_locked=false;
+    size_t max_write=SIZE_MAX;
+    unsigned write_calls=0;
+    bool is_write_locked() const { return write_locked; }
+    size_t write(const uint8_t *bytes,size_t length) {
+        check(channel_locks[channel].held,"UART enqueue holds channel lock");
+        write_calls++;
+        const size_t written=write_locked?0:std::min(length,max_write);
+        if (written==length) {
+            Wire frame{}; frame.channel=channel; frame.bytes.assign(bytes,bytes+length);
+            mavlink_message_t buffer{};
+            mavlink_status_t parser{},result{};
+            uint8_t framing=MAVLINK_FRAMING_INCOMPLETE;
+            for(size_t i=0;i<length;i++)
+                framing=mavlink_frame_char_buffer(&buffer,&parser,bytes[i],&frame.message,&result);
+            check(framing==MAVLINK_FRAMING_OK,"single UART write contains a complete frame with valid CRC");
+            wire.push_back(frame);
+        }
+        return written;
+    }
+};
 }
 class MAVLink_routing {
 public:
@@ -55,14 +91,21 @@ static MAVLink_routing router;
 class GCS_MAVLINK {
 public:
     bool writable=true;
-    bool check_payload_size(uint8_t) const { return writable; }
+    bool is_high_latency_link=false,has_uart=true;
+    AP_HAL::UARTDriver uart;
+    AP_HAL::UARTDriver *get_uart() { return has_uart?&uart:nullptr; }
+    bool check_payload_size(uint8_t) const {
+        check(channel_locks[uart.channel].held,"TX space check holds channel lock"); return writable;
+    }
     static bool send_to_component(uint8_t sys,uint8_t comp,uint32_t id,const char *pkt,uint8_t len) {
         return router.send_to_component(sys,comp,id,pkt,len);
     }
 };
 struct FakeGCS {
     GCS_MAVLINK links[4];
+    bool high_latency_enabled=true;
     GCS_MAVLINK *chan(mavlink_channel_t channel) { return unsigned(channel)<4 ? &links[channel] : nullptr; }
+    bool get_high_latency_status() const { return high_latency_enabled; }
 };
 static FakeGCS gcs_instance;
 static FakeGCS &gcs() { return gcs_instance; }
@@ -160,6 +203,12 @@ public:
 static void reset_transport() {
     wire.clear(); notices.clear(); logger.records.clear();
     router=MAVLink_routing{}; gcs_instance=FakeGCS{};
+    for (uint8_t channel=0;channel<4;channel++) {
+        channel_locks[channel]=FakeSemaphore{};
+        gcs_alternative_active[channel]=false;
+        gcs_instance.links[channel].uart.channel=static_cast<mavlink_channel_t>(channel);
+        *mavlink_get_channel_status(channel)=mavlink_status_t{};
+    }
     for (auto &pwm:servo_pwm) pwm=1500;
     servo_pwm[6]=2000; // remapped motor 3 on output 7
     clock_ms=0;
@@ -243,6 +292,31 @@ int main() {
         c.ap.land_complete=true; run(c,710,1500);
         check(wire.size()==1 && c.payload_release.state()==PayloadRelease::State::Cancelled,"landing stops adapter retries");
     }
+    for (unsigned blocked=0;blocked<7;blocked++) {
+        reset_transport(); route();
+        auto &link=gcs_instance.links[1];
+        if(blocked==0) gcs_alternative_active[1]=true;
+        if(blocked==1) { link.is_high_latency_link=true; gcs_instance.high_latency_enabled=false; }
+        if(blocked==2) link.uart.write_locked=true;
+        if(blocked==3) channel_locks[1].busy=true;
+        if(blocked==4) link.uart.max_write=1;
+        if(blocked==5) link.uart.max_write=0;
+        if(blocked==6) link.has_uart=false;
+        Copter c; c.g2.pldr_action.value=1; c.g2.pldr_mode.value=2;
+        c.payload_release.arm(c.payload_release_config()); run(c,0,600);
+        check(wire.empty() && c.payload_release.transmissions()==0,"suppressed/busy/short enqueue never counts as a send");
+        check(c.mode_requests==0 && c.mode.number==Mode::Number::LOITER,"AltHold waits for a complete UART enqueue");
+        check(!channel_locks[1].held,"failed send releases the channel lock");
+        if(blocked<4 || blocked==6) check(link.uart.write_calls==0,"suppressed/busy links never write UART bytes");
+        else check(link.uart.write_calls>0,"short-write regression exercises UART result");
+        gcs_alternative_active[1]=false;
+        gcs_instance.high_latency_enabled=true;
+        link.uart.write_locked=false; channel_locks[1].busy=false;
+        link.uart.max_write=SIZE_MAX; link.has_uart=true;
+        run(c,610,700);
+        check(wire.size()==1 && c.payload_release.transmissions()==1,"complete enqueue recovers before transaction deadline");
+        check(c.mode_requests==1 && c.mode.number==Mode::Number::ALT_HOLD,"recovered first enqueue requests AltHold once");
+    }
     {
         reset_transport(); route(); Copter c; c.g2.pldr_action.value=1; c.g2.pldr_mode.value=2;
         c.allow_mode_change=false; c.payload_release.arm(c.payload_release_config()); run(c,0,1000);
@@ -268,6 +342,47 @@ int main() {
         route(1,25,MAVLINK_COMM_2);
         check(router.send_to_component(1,25,76,pkt,sizeof(cmd)),"second exact route used if first is blocked");
         check(wire.size()==1 && wire.back().channel==MAVLINK_COMM_2,"route failover sends once");
+    }
+    {
+        reset_transport(); route(); route(1,25,MAVLINK_COMM_2);
+        channel_locks[1].busy=true;
+        mavlink_command_long_t cmd{}; cmd.target_system=1; cmd.target_component=25; cmd.command=6220; cmd.param1=1;
+        check(router.send_to_component(1,25,76,reinterpret_cast<const char*>(&cmd),sizeof(cmd)),"busy route fails over without waiting");
+        check(wire.size()==1 && wire.back().channel==MAVLINK_COMM_2,"busy-route failover sends once on exact recipient");
+        check(!channel_locks[1].held && !channel_locks[2].held,"route failover leaves no semaphore held");
+    }
+    {
+        reset_transport(); route();
+        auto *status=mavlink_get_channel_status(MAVLINK_COMM_1);
+        status->flags=MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
+        status->current_tx_seq=17;
+        mavlink_command_long_t cmd{}; cmd.target_system=1; cmd.target_component=25; cmd.command=6220; cmd.param1=1;
+        const char *pkt=reinterpret_cast<const char*>(&cmd);
+        check(router.send_to_component(1,25,76,pkt,sizeof(cmd)),"MAVLink1 targeted command enqueues");
+        check(wire.back().message.magic==MAVLINK_STX_MAVLINK1 && wire.back().message.len==MAVLINK_MSG_ID_COMMAND_LONG_MIN_LEN,
+            "MAVLink1 preserves framing and minimum payload length");
+        check(wire.back().message.seq==17 && status->current_tx_seq==18,"targeted sender shares channel sequence");
+        mavlink_param_ext_request_read_t extended{}; extended.target_system=1; extended.target_component=25;
+        check(!router.send_to_component(1,25,MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ,
+            reinterpret_cast<const char*>(&extended),sizeof(extended)),"MAVLink1 rejects unsupported extended message ID");
+        check(wire.size()==1 && status->current_tx_seq==18,"unsupported MAVLink1 packet consumes no sequence or UART write");
+    }
+    {
+        reset_transport(); route();
+        mavlink_signing_t signing{}; signing.flags=MAVLINK_SIGNING_FLAG_SIGN_OUTGOING;
+        signing.link_id=3; signing.timestamp=123456;
+        for(unsigned i=0;i<sizeof(signing.secret_key);i++) signing.secret_key[i]=uint8_t(i+1);
+        auto *status=mavlink_get_channel_status(MAVLINK_COMM_1);
+        status->signing=&signing; status->current_tx_seq=43;
+        mavlink_command_long_t cmd{}; cmd.target_system=1; cmd.target_component=25; cmd.command=6220; cmd.param1=1;
+        check(router.send_to_component(1,25,76,reinterpret_cast<const char*>(&cmd),sizeof(cmd)),"signed MAVLink2 command enqueues");
+        const auto &frame=wire.back();
+        check(frame.message.magic==MAVLINK_STX && (frame.message.incompat_flags&MAVLINK_IFLAG_SIGNED),"signed MAVLink2 framing preserved");
+        check(frame.message.seq==43 && status->current_tx_seq==44 && signing.timestamp==123457,"sequence and signing timestamp advance once");
+        mavlink_signing_streams_t streams{};
+        check(mavlink_signature_check(&signing,&streams,&frame.message),"serialized MAVLink2 signature verifies with real helper");
+        check(frame.bytes.size()==size_t(frame.message.len+MAVLINK_NUM_NON_PAYLOAD_BYTES+MAVLINK_SIGNATURE_BLOCK_LEN),
+            "UART write contains the entire signed MAVLink2 frame");
     }
     std::printf("PASS: %u production-integration assertions\n",checks);
 }

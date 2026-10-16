@@ -38,7 +38,8 @@ public:
     void send_to_components(uint32_t msgid, const char *pkt, uint8_t pkt_len);
 
     // Send once on an exact learned route; never broadcast or fall back to GCS.
-    // Returns false if there is no matching route or insufficient TX space.
+    // Returns true only after a complete frame enters a matching route's UART buffer.
+    // Busy, suppressed, write-locked or full links do not count as a send.
     bool send_to_component(uint8_t sysid, uint8_t compid, uint32_t msgid,
                            const char *pkt, uint8_t pkt_len);
 
