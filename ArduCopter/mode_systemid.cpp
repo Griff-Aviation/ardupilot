@@ -62,6 +62,13 @@ const AP_Param::GroupInfo ModeSystemId::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("_T_FADE_OUT", 7, ModeSystemId, time_fade_out, 2),
 
+    // @Param: _OPTIONS
+    // @DisplayName: System identification options
+    // @Description: Bit 0: hold altitude during attitude-loop sweeps (axes 1-12). The mode can then be entered from AltHold or any other mode, altitude is held as in AltHold with the throttle stick commanding climb rate, and roll, pitch and yaw stay under pilot control. Axis 13 (Mixer Thrust) and the position axes (14-19) are unaffected.
+    // @Bitmask: 0:Altitude hold for attitude axes
+    // @User: Standard
+    AP_GROUPINFO("_OPTIONS", 8, ModeSystemId, options, 0),
+
     AP_GROUPEND
 };
 
@@ -91,8 +98,16 @@ bool ModeSystemId::init(bool ignore_checks)
 
         // System ID is being done on the attitude control loops
 
-        // Can only switch into System ID Axes 1-13 with a flight mode that has manual throttle
-        if (!copter.flightmode->has_manual_throttle()) {
+        if (use_althold()) {
+            // Altitude is held as in AltHold, so any flying mode can switch in
+            if (!pos_control->is_active_U()) {
+                pos_control->init_U_controller();
+            }
+            pos_control->set_max_speed_accel_U_cm(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+            pos_control->set_correction_speed_accel_U_cmss(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+
+        // Otherwise can only switch into System ID Axes 1-13 with a flight mode that has manual throttle
+        } else if (!copter.flightmode->has_manual_throttle()) {
             gcs().send_text(MAV_SEVERITY_WARNING, "Axis requires manual throttle");
             return false;
         }
@@ -179,7 +194,47 @@ void ModeSystemId::run()
         // get pilot's desired yaw rate
         target_yaw_rate_rads = get_pilot_desired_yaw_rate_rads();
 
-        if (!motors->armed()) {
+        if (use_althold()) {
+            // Altitude hold, as ModeAltHold::run(): the throttle stick commands climb rate
+            pos_control->set_max_speed_accel_U_cm(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+            target_climb_rate_cms = get_pilot_desired_climb_rate();
+            target_climb_rate_cms = constrain_float(target_climb_rate_cms, -get_pilot_speed_dn(), g.pilot_speed_up);
+
+            switch (get_alt_hold_state(target_climb_rate_cms)) {
+            case AltHoldModeState::MotorStopped:
+                attitude_control->reset_rate_controller_I_terms();
+                attitude_control->reset_yaw_target_and_rate(false);
+                pos_control->relax_U_controller(0.0f);   // forces throttle output to decay to zero
+                break;
+
+            case AltHoldModeState::Landed_Ground_Idle:
+                attitude_control->reset_yaw_target_and_rate();
+                FALLTHROUGH;
+
+            case AltHoldModeState::Landed_Pre_Takeoff:
+                attitude_control->reset_rate_controller_I_terms_smoothly();
+                pos_control->relax_U_controller(0.0f);   // forces throttle output to decay to zero
+                break;
+
+            case AltHoldModeState::Takeoff:
+                if (!takeoff.running()) {
+                    takeoff.start(constrain_float(g.pilot_takeoff_alt, 0.0f, 1000.0f));
+                }
+                target_climb_rate_cms = get_avoidance_adjusted_climbrate_cms(target_climb_rate_cms);
+                takeoff.do_pilot_takeoff(target_climb_rate_cms);
+                break;
+
+            case AltHoldModeState::Flying:
+                motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
+                target_climb_rate_cms = get_avoidance_adjusted_climbrate_cms(target_climb_rate_cms);
+#if AP_RANGEFINDER_ENABLED
+                copter.surface_tracking.update_surface_offset();
+#endif
+                pos_control->set_pos_target_U_from_climb_rate_cm(target_climb_rate_cms);
+                break;
+            }
+
+        } else if (!motors->armed()) {
             // Motors should be Stopped
             motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::SHUT_DOWN);
         // Tradheli doesn't set spool state to ground idle when throttle stick is zero.  Ground idle only set when
@@ -222,11 +277,13 @@ void ModeSystemId::run()
         }
 
         // get pilot's desired throttle
+        if (!use_althold()) {
 #if FRAME_CONFIG == HELI_FRAME
-        pilot_throttle_scaled = copter.input_manager.get_pilot_desired_collective(channel_throttle->get_control_in());
+            pilot_throttle_scaled = copter.input_manager.get_pilot_desired_collective(channel_throttle->get_control_in());
 #else
-        pilot_throttle_scaled = get_pilot_desired_throttle();
+            pilot_throttle_scaled = get_pilot_desired_throttle();
 #endif
+        }
 
     }
 
@@ -352,8 +409,13 @@ void ModeSystemId::run()
         // call attitude controller
         attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw_rad(target_roll_rad, target_pitch_rad, target_yaw_rate_rads);
 
-        // output pilot's throttle
-        attitude_control->set_throttle_out(pilot_throttle_scaled, !copter.is_tradheli(), g.throttle_filt);
+        if (use_althold()) {
+            // run the vertical position controller and set output throttle
+            pos_control->update_U_controller();
+        } else {
+            // output pilot's throttle
+            attitude_control->set_throttle_out(pilot_throttle_scaled, !copter.is_tradheli(), g.throttle_filt);
+        }
         
     } else {
 
@@ -424,6 +486,14 @@ void ModeSystemId::log_data() const
         copter.logger.Write_PID(LOG_PIDE_MSG, pos_control->get_vel_NE_pid().get_pid_info_y());
 
     }
+}
+
+// true when an attitude-loop axis runs with altitude hold rather than manual throttle
+bool ModeSystemId::use_althold() const
+{
+    return ((options.get() & uint8_t(Option::ALTHOLD_ATTITUDE_AXES)) != 0)
+           && !is_poscontrol_axis_type()
+           && ((AxisType)axis.get() != AxisType::MIX_THROTTLE);
 }
 
 bool ModeSystemId::is_poscontrol_axis_type() const
