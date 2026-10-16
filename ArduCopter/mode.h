@@ -1710,7 +1710,7 @@ public:
     void exit() override;
 
     bool requires_GPS() const override { return false; }
-    bool has_manual_throttle() const override { return true; }
+    bool has_manual_throttle() const override { return !use_althold(); }
     bool allows_arming(AP_Arming::Method method) const override { return false; };
     bool is_autopilot() const override { return false; }
     bool logs_attitude() const override { return true; }
@@ -1730,6 +1730,13 @@ private:
 
     void log_data() const;
     bool is_poscontrol_axis_type() const;
+
+    // true when an attitude-loop axis runs with altitude hold (SID_OPTIONS bit 0) rather than manual throttle
+    bool use_althold() const;
+
+    enum class Option : uint8_t {
+        ALTHOLD_ATTITUDE_AXES = (1U << 0),
+    };
 
     enum class AxisType {
         NONE = 0,               // none
@@ -1761,6 +1768,7 @@ private:
     AP_Float time_fade_in;      // Time to reach maximum amplitude of chirp
     AP_Float time_record;       // Time taken to complete the chirp waveform
     AP_Float time_fade_out;     // Time to reach zero amplitude after chirp finishes
+    AP_Int8 options;            // Bitmask of options, see Option
 
     bool att_bf_feedforward;    // Setting of attitude_control->get_bf_feedforward
     float waveform_time;        // Time reference for waveform
