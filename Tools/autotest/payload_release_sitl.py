@@ -79,7 +79,11 @@ def run(test):
                         test.mav.mav.command_long_send(1, 25, 6220, 0, 0, 0, 0, 0, 0, 0, 0)
 
                 test.install_message_hook_context(peer_hook)
-                test.takeoff(80, mode='LOITER')
+                # RC3=1700 requests 0.625 m/s with the Copter defaults; reaching
+                # 79 m takes more than the helper's default 120 s timeout.
+                test.takeoff(80, mode='LOITER', timeout=180)
+                test.wait_climbrate(-0.2, 0.2, minimum_duration=2, timeout=20)
+                test.wait_altitude(78, 86, relative=True, minimum_duration=2, timeout=20)
                 # Learn the peer route before injecting a failure. Source identity is
                 # restored immediately, preserving the autotest GCS identity.
                 as_b100(lambda mav: mav.heartbeat_send(

@@ -103,7 +103,9 @@ accuracy for physical release.
 The SITL scenario uses a synthetic 77 kg quad, not a validated G30 model. It
 removes one simulated motor's thrust and tests warn-only/configuration freeze,
 accepted/rejected/no ACK, manual close, retries, latch and ordering versus crash
-messages. The fake B100 peer exists only on the SITL link. Every scenario resets
+messages. The initial climb allows 180 simulated seconds and must settle to a
+near-zero climb rate and hold altitude before the failure is injected.
+The fake B100 peer exists only on the SITL link. Every scenario resets
 SITL; native tests separately cover disarm/re-arm without reboot. Execute this
 scenario before treating its model/test timings as validated.
 
