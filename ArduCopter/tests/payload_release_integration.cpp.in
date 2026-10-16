@@ -28,6 +28,7 @@ static bool is_zero(float x) { return std::fabs(x)<1.1920928955078125e-7f; }
 static float MIN(float a,float b) { return std::fmin(a,b); }
 struct { uint8_t sysid=1,compid=1; } mavlink_system;
 static std::vector<std::string> notices;
+static void notice(int, const char *text) { notices.emplace_back(text); }
 template<typename... Args> static void notice(int, const char *fmt, Args... args) {
     char text[160]; std::snprintf(text,sizeof(text),fmt,args...); notices.emplace_back(text);
 }
