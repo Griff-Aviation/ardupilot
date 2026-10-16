@@ -159,7 +159,7 @@ void Copter::payload_release_handle_message(const mavlink_message_t &msg)
     } else if (msg.msgid == MAVLINK_MSG_ID_COMMAND_LONG) {
         mavlink_command_long_t command;
         mavlink_msg_command_long_decode(&msg, &command);
-        if (command.command == PayloadRelease::COMMAND && command.param1 == 0) {
+        if (command.command == PayloadRelease::COMMAND && is_zero(command.param1)) {
             payload_release.manual_close(command.target_system, command.target_component);
         }
     }
