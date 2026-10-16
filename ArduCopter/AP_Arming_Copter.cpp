@@ -205,6 +205,11 @@ bool AP_Arming_Copter::parameter_checks(bool display_failure)
     // check various parameter values
     if (check_enabled(Check::PARAMETERS)) {
 
+        if (!copter.payload_release_config().valid()) {
+            check_failed(Check::PARAMETERS, display_failure, "Check PLDR parameters");
+            return false;
+        }
+
         // failsafe parameter checks
         if (copter.g.failsafe_throttle) {
             // check throttle min is above throttle failsafe trigger and that the trigger is above ppm encoder's loss-of-signal value of 900
@@ -758,6 +763,8 @@ bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_
 
     // finally actually arm the motors
     copter.motors->armed(true);
+    copter.payload_release.arm(copter.payload_release_config());
+    copter.payload_release_notice_sent = false;
 
 #if HAL_LOGGING_ENABLED
     // log flight mode in case it was changed while vehicle was disarmed
@@ -834,6 +841,7 @@ bool AP_Arming_Copter::disarm(const AP_Arming::Method method, bool do_disarm_che
 
     // send disarm command to motors
     copter.motors->armed(false);
+    copter.payload_release.disarm();
 
 #if MODE_AUTO_ENABLED
     // reset the mission

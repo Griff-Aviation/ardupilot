@@ -1,0 +1,21 @@
+{
+    "mass": 77.0,
+    "diagonal_size": 3.0,
+    "refSpd": 15.0,
+    "refAngle": 30.0,
+    "refVoltage": 58.0,
+    "refCurrent": 100.0,
+    "refAlt": 0.0,
+    "refTempC": 20.0,
+    "maxVoltage": 67.2,
+    "battCapacityAh": 0.0,
+    "refBatRes": 0.0,
+    "propExpo": 0.8,
+    "hoverThrOut": 0.42,
+    "pwmMin": 1000.0,
+    "pwmMax": 2000.0,
+    "spin_min": 0.15,
+    "spin_max": 0.95,
+    "slew_max": 150.0,
+    "num_motors": 4.0
+}

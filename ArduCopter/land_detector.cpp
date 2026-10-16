@@ -27,6 +27,7 @@ void Copter::update_land_and_crash_detectors()
     parachute_check();
 #endif
 
+    payload_release_check();
     crash_check();
     thrust_loss_check();
     yaw_imbalance_check();

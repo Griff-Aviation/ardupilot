@@ -173,6 +173,7 @@
 #endif
 // Local modules
 #include "Parameters.h"
+#include "PayloadRelease.h"
 #if USER_PARAMS_ENABLED
 #include "UserParameters.h"
 #endif
@@ -242,6 +243,17 @@ private:
     // Global parameters are all contained within the 'g' class.
     Parameters g;
     ParametersG2 g2;
+
+    PayloadRelease payload_release;
+    uint32_t payload_release_log_ms = 0;
+    uint32_t payload_release_notice_ms = 0;
+    bool payload_release_notice_sent = false;
+    uint8_t payload_release_logged_state = 0;
+    PayloadRelease::Config payload_release_config() const;
+    void payload_release_check();
+#if HAL_GCS_ENABLED
+    void payload_release_handle_message(const mavlink_message_t &msg);
+#endif
 
     // used to detect MAVLink acks from GCS to stop compassmot
     uint8_t command_ack_counter;

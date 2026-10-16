@@ -1,0 +1,272 @@
+// Production integration methods are inserted verbatim by the test runner.
+// Only HAL, vehicle sensors/outputs and transport boundaries are substituted.
+#include "PayloadRelease.h"
+#include "ardupilotmega/mavlink.h"
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+#include <string>
+
+static unsigned checks;
+static void check(bool value, const char *label) {
+    checks++; if (!value) { std::fprintf(stderr,"FAIL: %s\n",label); std::exit(1); }
+}
+static uint32_t clock_ms;
+namespace AP_HAL {
+uint32_t millis() { return clock_ms; }
+uint64_t micros64() { return uint64_t(clock_ms)*1000; }
+}
+static constexpr float pi=3.14159265358979323846f;
+static float degrees(float x) { return x * (180.0f / pi); }
+static float constrain_float(float x,float low,float high) { return std::fmax(low,std::fmin(high,x)); }
+static float radians(float x) { return x*(pi/180); }
+static bool is_positive(float x) { return x>0; }
+static float MIN(float a,float b) { return std::fmin(a,b); }
+struct { uint8_t sysid=1,compid=1; } mavlink_system;
+static std::vector<std::string> notices;
+template<typename... Args> static void notice(int, const char *fmt, Args... args) {
+    char text[160]; std::snprintf(text,sizeof(text),fmt,args...); notices.emplace_back(text);
+}
+#define GCS_SEND_TEXT(level,...) notice(level,__VA_ARGS__)
+#define HAL_GCS_ENABLED 1
+#define HAL_LOGGING_ENABLED 1
+#define MODE_LOITER_ENABLED 1
+#define FRAME_CONFIG 0
+#define HELI_FRAME 1
+#define AP_MOTORS_MAX_NUM_MOTORS 4
+
+struct Wire { mavlink_channel_t channel; mavlink_message_t message; };
+static std::vector<Wire> wire;
+static void _mav_finalize_message_chan_send(mavlink_channel_t channel, uint32_t id,
+    const char *pkt,uint8_t,uint8_t length,uint8_t) {
+    Wire frame{}; frame.channel=channel; frame.message.msgid=id; frame.message.len=length;
+    std::memcpy(_MAV_PAYLOAD_NON_CONST(&frame.message),pkt,length); wire.push_back(frame);
+}
+class MAVLink_routing {
+public:
+    uint8_t num_routes=0,no_route_mask=0;
+    struct Route { uint8_t sysid=0,compid=0; mavlink_channel_t channel=MAVLINK_COMM_0; } routes[8];
+    bool send_to_component(uint8_t,uint8_t,uint32_t,const char*,uint8_t);
+};
+static MAVLink_routing router;
+class GCS_MAVLINK {
+public:
+    bool writable=true;
+    bool check_payload_size(uint8_t) const { return writable; }
+    static bool send_to_component(uint8_t sys,uint8_t comp,uint32_t id,const char *pkt,uint8_t len) {
+        return router.send_to_component(sys,comp,id,pkt,len);
+    }
+};
+struct FakeGCS {
+    GCS_MAVLINK links[4];
+    GCS_MAVLINK *chan(mavlink_channel_t channel) { return unsigned(channel)<4 ? &links[channel] : nullptr; }
+};
+static FakeGCS gcs_instance;
+static FakeGCS &gcs() { return gcs_instance; }
+struct Log {
+    struct Record { double tilt,limit,error,rate; unsigned pwm,motor,channel,state,events,trigger,tx,ack; };
+    std::vector<Record> records;
+    void Write(const char*,const char *labels,const char *format,uint64_t,double tilt,double limit,
+        double error,double rate,unsigned pwm,unsigned motor,unsigned channel,double,unsigned state,unsigned events,
+        unsigned trigger,unsigned tx,unsigned ack,unsigned) {
+        check(std::strlen(format)==15,"log format has fifteen fields");
+        unsigned fields=1; for (const char *p=labels;*p;p++) fields+=*p==',';
+        check(fields==15 && std::strlen(labels)<64,"log labels fit DataFlash format");
+        records.push_back({tilt,limit,error,rate,pwm,motor,channel,state,events,trigger,tx,ack});
+    }
+};
+static Log logger;
+namespace AP { static Log &logger() { return ::logger; } }
+struct Mode {
+    enum class Number:uint8_t { STABILIZE=0,ACRO=1,ALT_HOLD=2,LOITER=5,FLIP=14,TURTLE=28 };
+    Number number=Number::LOITER;
+    Number mode_number() const { return number; }
+    bool crash_check_enabled() const { return number!=Number::ACRO && number!=Number::FLIP; }
+};
+enum class ModeReason:uint8_t { PAYLOAD_RELEASE=56 };
+template<typename T> struct Param { T value; T get() const { return value; } };
+struct Params {
+    Param<int8_t> pldr_enable{1},pldr_action{0},pldr_mode{0};
+    Param<int16_t> pldr_pwm{1950},pldr_sysid{1},pldr_compid{25};
+    Param<float> pldr_time{0.5f},pldr_angle_pct{110};
+};
+static uint16_t servo_pwm[8];
+struct SRV_Channels {
+    static unsigned get_motor_function(uint8_t motor) { return 33+motor; }
+    static bool find_channel(unsigned function,uint8_t &channel) {
+        static const uint8_t mapping[]={4,1,6,2};
+        if(function<33 || function>36) return false;
+        channel=mapping[function-33]; return true;
+    }
+    static bool get_output_pwm(unsigned function,uint16_t &value) {
+        if (function<33 || function>36) return false;
+        uint8_t channel;
+        if(!find_channel(function,channel)) return false;
+        value=servo_pwm[channel]; return true;
+    }
+};
+struct Motors {
+    bool arm_state=true;
+    bool armed() const { return arm_state; }
+    bool is_motor_enabled(uint8_t i) const { return i<4; }
+};
+struct Attitude {
+    float error=0;
+    float get_att_error_angle_deg() const { return error; }
+};
+struct AHRS {
+    float roll=0,pitch=pi/6;
+    float cos_roll() const { return std::cos(roll); }
+    float cos_pitch() const { return std::cos(pitch); }
+};
+struct AC_Loiter {
+    float _angle_max_deg=20;
+    struct { float limit=pi/6; float lean_angle_max_rad() const { return limit; } } _attitude_control;
+    struct { float limit=pi/6; float get_lean_angle_max_rad() const { return limit; } } _pos_control;
+    float get_angle_max_rad() const;
+};
+class Copter {
+public:
+    PayloadRelease payload_release;
+    Params g2;
+    uint32_t payload_release_log_ms=0,payload_release_notice_ms=0;
+    bool payload_release_notice_sent=false;
+    uint8_t payload_release_logged_state=0;
+    Motors motor; Motors *motors=&motor;
+    Attitude attitude; Attitude *attitude_control=&attitude;
+    Mode mode; Mode *flightmode=&mode;
+    AC_Loiter loiter; AC_Loiter *loiter_nav=&loiter;
+    AHRS ahrs;
+    struct { Param<int16_t> angle_max{4500}; } aparm;
+    struct { bool land_complete=false; } ap;
+    bool standby_active=false,allow_mode_change=true;
+    unsigned mode_requests=0;
+    PayloadRelease::Config payload_release_config() const;
+    void payload_release_check();
+    void payload_release_handle_message(const mavlink_message_t &msg);
+    bool set_mode(Mode::Number number, ModeReason reason) {
+        check(reason==ModeReason::PAYLOAD_RELEASE,"dedicated mode reason");
+        mode_requests++;
+        if (allow_mode_change) mode.number=number;
+        return allow_mode_change;
+    }
+};
+
+// @PRODUCTION_METHODS@
+
+static void reset_transport() {
+    wire.clear(); notices.clear(); logger.records.clear();
+    router=MAVLink_routing{}; gcs_instance=FakeGCS{};
+    for (auto &pwm:servo_pwm) pwm=1500;
+    servo_pwm[6]=2000; // remapped motor 3 on output 7
+    clock_ms=0;
+}
+static void route(uint8_t sys=1,uint8_t comp=25,mavlink_channel_t channel=MAVLINK_COMM_1) {
+    auto &r=router.routes[router.num_routes++]; r.sysid=sys; r.compid=comp; r.channel=channel;
+}
+static void run(Copter &c,unsigned start,unsigned end) {
+    for (unsigned t=start;t<=end;t+=10) {
+        clock_ms=t; c.attitude.error=float(t)*0.01f; c.payload_release_check();
+    }
+}
+static mavlink_message_t ack(uint8_t result=0,uint8_t sys=1,uint8_t comp=25,uint8_t ts=1,uint8_t tc=1) {
+    mavlink_message_t msg{}; mavlink_msg_command_ack_pack(sys,comp,&msg,6220,result,0,0,ts,tc); return msg;
+}
+int main() {
+    {
+        AC_Loiter loiter;
+        loiter._angle_max_deg=0;
+        check(std::fabs(degrees(loiter.get_angle_max_rad())-20)<0.001,"actual zero-parameter Loiter fallback");
+        loiter._angle_max_deg=40;
+        check(std::fabs(degrees(loiter.get_angle_max_rad())-30)<0.001,"actual Loiter position-controller cap");
+    }
+    {
+        reset_transport(); Copter c; c.g2.pldr_mode.value=2;
+        c.payload_release.arm(c.payload_release_config());
+        c.g2.pldr_action.value=1; // frozen warn configuration
+        run(c,0,1500);
+        check(c.payload_release.state()==PayloadRelease::State::WarnLatched,"adapter triggers warn mode");
+        check(wire.empty() && c.mode_requests==0,"adapter warn mode cannot transmit or change mode");
+        check(logger.records.back().trigger==3 && logger.records.back().motor==3,"motor 3 attribution survives mapping");
+        check(logger.records.back().channel==7,"remapped output channel is logged");
+        check(std::fabs(logger.records.back().limit-22)<0.001,"effective Loiter angle selected");
+    }
+    {
+        reset_transport(); route(); route(1,191,MAVLINK_COMM_0);
+        Copter c; c.g2.pldr_action.value=1; c.g2.pldr_mode.value=2;
+        c.payload_release.arm(c.payload_release_config()); run(c,0,500);
+        check(wire.size()==1 && wire[0].channel==MAVLINK_COMM_1,"only exact B100 route used");
+        check(c.mode_requests==1 && c.mode.number==Mode::Number::ALT_HOLD,"AltHold at first send, before ACK");
+        mavlink_command_long_t command{}; mavlink_msg_command_long_decode(&wire[0].message,&command);
+        check(command.target_system==1 && command.target_component==25 && command.command==6220,"wire command and recipient");
+        check(command.param1==1 && command.param2==0 && command.param3==0 && command.param4==0 &&
+            command.param5==0 && command.param6==0 && command.param7==0 && command.confirmation==0,"wire release parameters");
+        run(c,510,750); check(wire.size()==2 && c.mode_requests==1,"retry does not repeat mode change");
+        c.payload_release_handle_message(ack(0,1,25,255,190));
+        check(c.payload_release.state()==PayloadRelease::State::Pending,"GCS-addressed ACK ignored");
+        c.payload_release_handle_message(ack()); run(c,760,1500);
+        check(wire.size()==2 && c.payload_release.state()==PayloadRelease::State::Accepted,"accepted ACK terminates sends");
+        c.motor.arm_state=false; c.payload_release.disarm(); c.payload_release_check();
+        check(logger.records.back().state==0,"disarm transition is observable in PLDR log");
+        c.motor.arm_state=true; c.mode.number=Mode::Number::LOITER;
+        c.payload_release.arm(c.payload_release_config()); run(c,2000,2500);
+        check(wire.size()==3 && c.payload_release.latched(),"rearm without reboot permits exactly one new transaction");
+    }
+    {
+        reset_transport(); Copter c; c.g2.pldr_action.value=1; c.g2.pldr_mode.value=2;
+        c.payload_release.arm(c.payload_release_config()); run(c,0,1300);
+        check(wire.empty() && c.mode_requests==0,"no learned route means no send or AltHold");
+        check(c.payload_release.state()==PayloadRelease::State::TimedOut,"missing-route transaction expires");
+    }
+    {
+        reset_transport(); route(); Copter c; c.g2.pldr_action.value=1;
+        c.payload_release.arm(c.payload_release_config()); run(c,0,500);
+        mavlink_message_t msg{};
+        mavlink_msg_command_long_pack(255,190,&msg,1,25,6220,0,0,0,0,0,0,0,0);
+        c.payload_release_handle_message(msg); run(c,510,1600);
+        check(wire.size()==1 && c.payload_release.state()==PayloadRelease::State::Cancelled,"forwarded manual close cancels retries");
+    }
+    for (const auto number:{Mode::Number::ACRO,Mode::Number::FLIP,Mode::Number::TURTLE}) {
+        reset_transport(); route(); Copter c; c.mode.number=number; c.g2.pldr_action.value=1;
+        c.payload_release.arm(c.payload_release_config()); run(c,0,2000);
+        check(wire.empty() && !c.payload_release.latched(),"excluded mode cannot trigger");
+    }
+    {
+        reset_transport(); route(); gcs_instance.links[1].writable=false;
+        Copter c; c.g2.pldr_action.value=1; c.payload_release.arm(c.payload_release_config()); run(c,0,600);
+        check(wire.empty() && c.payload_release.transmissions()==0,"full TX buffer is not reported as a send");
+        gcs_instance.links[1].writable=true; run(c,610,700);
+        check(wire.size()==1,"blocked TX recovers before deadline");
+        c.ap.land_complete=true; run(c,710,1500);
+        check(wire.size()==1 && c.payload_release.state()==PayloadRelease::State::Cancelled,"landing stops adapter retries");
+    }
+    {
+        reset_transport(); route(); Copter c; c.g2.pldr_action.value=1; c.g2.pldr_mode.value=2;
+        c.allow_mode_change=false; c.payload_release.arm(c.payload_release_config()); run(c,0,1000);
+        check(wire.size()==3 && c.mode_requests==1,"rejected AltHold leaves release transaction running");
+        bool failure_logged=false;
+        for(const auto &record:logger.records) failure_logged|=(record.events & 256U)!=0;
+        check(failure_logged,"rejected AltHold is recorded in PLDR events");
+        mavlink_command_long_t cmd{}; mavlink_msg_command_long_decode(&wire.back().message,&cmd);
+        check(cmd.confirmation==2,"retry confirmation increases");
+    }
+    {
+        reset_transport(); route();
+        mavlink_command_long_t cmd{}; cmd.target_system=1; cmd.target_component=25; cmd.command=6220; cmd.param1=1;
+        const char *pkt=reinterpret_cast<const char*>(&cmd);
+        check(!router.send_to_component(0,25,76,pkt,sizeof(cmd)),"broadcast route request rejected");
+        check(!router.send_to_component(1,26,76,pkt,sizeof(cmd)),"mismatched packet target rejected");
+        check(!router.send_to_component(1,25,76,pkt,1),"truncated packet rejected");
+        router.no_route_mask=2;
+        check(!router.send_to_component(1,25,76,pkt,sizeof(cmd)),"disabled channel respected");
+        check(wire.empty(),"negative routing tests never send");
+        router.no_route_mask=0;
+        gcs_instance.links[1].writable=false;
+        route(1,25,MAVLINK_COMM_2);
+        check(router.send_to_component(1,25,76,pkt,sizeof(cmd)),"second exact route used if first is blocked");
+        check(wire.size()==1 && wire.back().channel==MAVLINK_COMM_2,"route failover sends once");
+    }
+    std::printf("PASS: %u production-integration assertions\n",checks);
+}

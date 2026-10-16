@@ -37,6 +37,11 @@ public:
     */
     void send_to_components(uint32_t msgid, const char *pkt, uint8_t pkt_len);
 
+    // Send once on an exact learned route; never broadcast or fall back to GCS.
+    // Returns false if there is no matching route or insufficient TX space.
+    bool send_to_component(uint8_t sysid, uint8_t compid, uint32_t msgid,
+                           const char *pkt, uint8_t pkt_len);
+
     /*
       search for the first vehicle or component in the routing table with given mav_type and retrieve it's sysid, compid and channel
       returns true if a match is found

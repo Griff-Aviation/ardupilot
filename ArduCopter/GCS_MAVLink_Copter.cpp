@@ -390,6 +390,9 @@ void GCS_MAVLINK_Copter::packetReceived(const mavlink_status_t &status,
         copter.avoidance_adsb.handle_msg(msg);
     }
 #endif
+    // Observe before routing: a manual command addressed to B100 is forwarded,
+    // rather than dispatched to this autopilot's command handler.
+    copter.payload_release_handle_message(msg);
     GCS_MAVLINK::packetReceived(status, msg);
 }
 

@@ -443,6 +443,9 @@ public:
       This is a no-op if no routes to components have been learned
     */
     static void send_to_components(uint32_t msgid, const char *pkt, uint8_t pkt_len) { routing.send_to_components(msgid, pkt, pkt_len); }
+    static bool send_to_component(uint8_t sysid, uint8_t compid, uint32_t msgid, const char *pkt, uint8_t pkt_len) {
+        return routing.send_to_component(sysid, compid, msgid, pkt, pkt_len);
+    }
 
     /*
       allow forwarding of packets / heartbeats to be blocked as required by some components to reduce traffic

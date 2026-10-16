@@ -688,6 +688,16 @@ public:
     AP_Float pldp_delay_s;
     AP_Float pldp_descent_speed_ms;
 
+    // Loss-of-control payload release (configuration is latched on arming).
+    AP_Int8 pldr_enable;
+    AP_Int16 pldr_pwm;
+    AP_Float pldr_time;
+    AP_Float pldr_angle_pct;
+    AP_Int8 pldr_action;
+    AP_Int8 pldr_mode;
+    AP_Int16 pldr_sysid;
+    AP_Int16 pldr_compid;
+
     AP_Int8 att_enable;
     AP_Int8 att_decimation;
 };

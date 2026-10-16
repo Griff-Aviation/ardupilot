@@ -258,6 +258,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.do_RTL()
 
+    def AutoPayloadRelease(self):
+        """Test payload loss-of-control detection and B100 command handling."""
+        from payload_release_sitl import run
+        run(self)
+
     def LoiterSpeedLimit(self):
         """Test Loiter speed limit with an explicit terminal speed."""
         loiter_speed_ms = 3.0
@@ -12336,6 +12341,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.ModeAltHold,
              self.ModeLoiter,
              self.LoiterSpeedLimit,
+             self.AutoPayloadRelease,
              self.SimpleMode,
              self.SuperSimpleCircle,
              self.ModeCircle,

@@ -227,10 +227,40 @@ bool MAVLink_routing::check_and_forward(GCS_MAVLINK &in_link, const mavlink_mess
 }
 
 /*
-  send a MAVLink message to all components with this vehicle's system id
+  Send a targeted message on one exact learned route.
 
-  This is a no-op if no routes to components have been learned
+  There is no broadcast or GCS fallback if the target route is unknown.
 */
+bool MAVLink_routing::send_to_component(uint8_t sysid, uint8_t compid, uint32_t msgid,
+                                       const char *pkt, uint8_t pkt_len)
+{
+    const mavlink_msg_entry_t *entry = mavlink_get_msg_entry(msgid);
+    if (sysid == 0 || compid == 0 || pkt == nullptr || entry == nullptr ||
+        pkt_len < entry->max_msg_len ||
+        !(entry->flags & MAV_MSG_ENTRY_FLAG_HAVE_TARGET_SYSTEM) ||
+        !(entry->flags & MAV_MSG_ENTRY_FLAG_HAVE_TARGET_COMPONENT) ||
+        uint8_t(pkt[entry->target_system_ofs]) != sysid ||
+        uint8_t(pkt[entry->target_component_ofs]) != compid) {
+        return false;
+    }
+    for (uint8_t i = 0; i < num_routes; i++) {
+        const auto &route = routes[i];
+        if (route.sysid != sysid || route.compid != compid ||
+            (no_route_mask & (1U << (route.channel - MAVLINK_COMM_0)))) {
+            continue;
+        }
+        GCS_MAVLINK *link = gcs().chan(route.channel);
+        if (link == nullptr || !link->check_payload_size(entry->max_msg_len)) {
+            continue;
+        }
+        _mav_finalize_message_chan_send(route.channel, entry->msgid, pkt,
+                                        entry->min_msg_len, entry->max_msg_len, entry->crc_extra);
+        return true;
+    }
+    return false;
+}
+
+// Send a message to all learned components with this vehicle's system ID.
 void MAVLink_routing::send_to_components(uint32_t msgid, const char *pkt, uint8_t pkt_len)
 {
     const mavlink_msg_entry_t *entry = mavlink_get_msg_entry(msgid);

@@ -1208,6 +1208,70 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     AP_GROUPINFO("FSTRATE_DIV", 10, ParametersG2, att_decimation, 1),
 #endif
 
+    // @Param: PLDR_ENABLE
+    // @DisplayName: Automatic payload release enable
+    // @Description: Enable loss-of-control payload monitoring. Configuration is captured at arming; changes apply at the next arming.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_ENABLE", 11, ParametersG2, pldr_enable, 0),
+
+    // @Param: PLDR_PWM
+    // @DisplayName: Payload release motor saturation PWM
+    // @Description: Motor output at or above which the per-motor saturation timer runs. Uses the commanded output after motor mixing, in PWM-equivalent microseconds.
+    // @Units: PWM
+    // @Range: 1000 2200
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_PWM", 12, ParametersG2, pldr_pwm, 1950),
+
+    // @Param: PLDR_TIME
+    // @DisplayName: Payload release saturation time
+    // @Description: Continuous saturation time required for one motor. A PWM drop below PLDR_PWM resets that motor's timer and remembered control-loss condition.
+    // @Units: s
+    // @Range: 0.1 2
+    // @Increment: 0.1
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_TIME", 13, ParametersG2, pldr_time, 0.5),
+
+    // @Param: PLDR_ANG_PCT
+    // @DisplayName: Payload release tilt percentage
+    // @Description: Tilt must exceed this percentage of the effective Loiter pilot angle limit in Loiter, or ANGLE_MAX in other supported modes, while thrust-direction attitude error is increasing over 100 ms.
+    // @Units: %
+    // @Range: 100 200
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_ANG_PCT", 14, ParametersG2, pldr_angle_pct, 110),
+
+    // @Param: PLDR_ACTION
+    // @DisplayName: Payload release trigger action
+    // @Description: Warn and log only sends no payload command and makes no mode change. Release sends Griff command 6220 with param1=1. Automatic triggering is latched until disarm; manual hook control remains available.
+    // @Values: 0:Warn and log only,1:Release
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_ACTION", 15, ParametersG2, pldr_action, 0),
+
+    // @Param: PLDR_MODE
+    // @DisplayName: Payload release mode after sending
+    // @Description: Optional mode requested once on the first successful transmission of a release command. Does not wait for ACK. No mode change in warn-only operation.
+    // @Values: 0:No change,2:AltHold
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_MODE", 16, ParametersG2, pldr_mode, 0),
+
+    // @Param: PLDR_SYSID
+    // @DisplayName: Payload release target system
+    // @Description: MAVLink system ID of the Griff payload controller. Must be nonzero; broadcast is not supported. The inspected B100 firmware uses system 1.
+    // @Range: 1 255
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_SYSID", 17, ParametersG2, pldr_sysid, 1),
+
+    // @Param: PLDR_COMPID
+    // @DisplayName: Payload release target component
+    // @Description: MAVLink component ID of the Griff payload controller. Must be nonzero; broadcast is not supported. The inspected B100 firmware uses component 25.
+    // @Range: 1 255
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("PLDR_COMPID", 18, ParametersG2, pldr_compid, 25),
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND
