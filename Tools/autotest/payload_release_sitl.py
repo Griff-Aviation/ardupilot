@@ -10,8 +10,12 @@ from vehicle_test_suite import NotAchievedException
 
 
 def run(test):
-    model = os.path.join(test.rootdir(), 'Tools', 'autotest', 'models',
-                         'payload-release-heavy.json')
+    # SITL's filesystem maps leading '/' to its working directory. The child
+    # inherits this process's cwd, so pass a relative path to the model.
+    model = os.path.relpath(os.path.join(test.rootdir(), 'Tools', 'autotest', 'models',
+                                        'payload-release-heavy.json'))
+    if not os.path.isfile(model):
+        raise NotAchievedException('Payload release model not found: ' + model)
     test.context_push()
     try:
         for response in ('warn', 'accept', 'reject', 'timeout', 'manual-close'):
