@@ -42,7 +42,7 @@ def main():
         print(result.stdout,end='',flush=True)
         if result.returncode:
             raise SystemExit(result.returncode)
-    flags=['-std=c++11','-O2','-Wall','-Wextra','-Werror','-I'+str(repo/'ArduCopter')]
+    flags=['-std=c++11','-O2','-Wall','-Wextra','-Wshadow','-Werror','-I'+str(repo/'ArduCopter')]
     exe=build/('core'+suffix)
     run([compiler,*flags,repo/'ArduCopter/PayloadRelease.cpp',repo/'ArduCopter/tests/test_payload_release.cpp','-o',exe])
     run([exe])

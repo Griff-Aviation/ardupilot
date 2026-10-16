@@ -47,7 +47,7 @@ static void _mav_finalize_message_chan_send(mavlink_channel_t channel, uint32_t 
 class MAVLink_routing {
 public:
     uint8_t num_routes=0,no_route_mask=0;
-    struct Route { uint8_t sysid=0,compid=0; mavlink_channel_t channel=MAVLINK_COMM_0; } routes[8];
+    struct route { uint8_t sysid=0,compid=0; mavlink_channel_t channel=MAVLINK_COMM_0; } routes[8];
     bool send_to_component(uint8_t,uint8_t,uint32_t,const char*,uint8_t);
 };
 static MAVLink_routing router;

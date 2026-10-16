@@ -244,16 +244,16 @@ bool MAVLink_routing::send_to_component(uint8_t sysid, uint8_t compid, uint32_t 
         return false;
     }
     for (uint8_t i = 0; i < num_routes; i++) {
-        const auto &route = routes[i];
-        if (route.sysid != sysid || route.compid != compid ||
-            (no_route_mask & (1U << (route.channel - MAVLINK_COMM_0)))) {
+        const auto &target_route = routes[i];
+        if (target_route.sysid != sysid || target_route.compid != compid ||
+            (no_route_mask & (1U << (target_route.channel - MAVLINK_COMM_0)))) {
             continue;
         }
-        GCS_MAVLINK *link = gcs().chan(route.channel);
+        GCS_MAVLINK *link = gcs().chan(target_route.channel);
         if (link == nullptr || !link->check_payload_size(entry->max_msg_len)) {
             continue;
         }
-        _mav_finalize_message_chan_send(route.channel, entry->msgid, pkt,
+        _mav_finalize_message_chan_send(target_route.channel, entry->msgid, pkt,
                                         entry->min_msg_len, entry->max_msg_len, entry->crc_extra);
         return true;
     }
