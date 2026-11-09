@@ -559,12 +559,14 @@ void AC_PosControl::input_accel_NE_cm(const Vector3f& accel_neu_cmss)
 ///     The kinematic path is constrained by the maximum acceleration and jerk set using the function set_max_speed_accel_ne.
 ///     The function modifies vel_ne_cms to follow the kinematic trajectory toward accel_cmss.
 ///     The parameter limit_output specifies if the velocity and acceleration limits are applied to the sum of commanded and correction values or just correction.
-void AC_PosControl::input_vel_accel_NE_cm(Vector2f& vel_ne_cms, const Vector2f& accel_ne_cmss, bool limit_output)
+void AC_PosControl::input_vel_accel_NE_cm(Vector2f& vel_ne_cms, const Vector2f& accel_ne_cmss, bool limit_output, float jerk_limit_cmsss)
 {
     update_pos_vel_accel_xy(_pos_desired_neu_cm.xy(), _vel_desired_neu_cms.xy(), _accel_desired_neu_cmss.xy(), _dt_s, _limit_vector.xy(), _p_pos_ne.get_error(), _pid_vel_ne.get_error());
 
+    const float jerk_max_cmsss = is_positive(jerk_limit_cmsss) ?
+        (is_positive(_jerk_max_ne_cmsss) ? MIN(_jerk_max_ne_cmsss, jerk_limit_cmsss) : jerk_limit_cmsss) : _jerk_max_ne_cmsss;
     shape_vel_accel_xy(vel_ne_cms, accel_ne_cmss, _vel_desired_neu_cms.xy(), _accel_desired_neu_cmss.xy(),
-        _accel_max_ne_cmss, _jerk_max_ne_cmsss, _dt_s, limit_output);
+        _accel_max_ne_cmss, jerk_max_cmsss, _dt_s, limit_output);
 
     update_vel_accel_xy(vel_ne_cms, accel_ne_cmss, _dt_s, Vector2f(), Vector2f());
 }
@@ -638,7 +640,7 @@ bool AC_PosControl::is_active_NE() const
 ///     Position and velocity errors are converted to velocity and acceleration targets using PID objects
 ///     Desired velocity and accelerations are added to these corrections as they are calculated
 ///     Kinematically consistent target position and desired velocity and accelerations should be provided before calling this function
-void AC_PosControl::update_NE_controller()
+void AC_PosControl::update_NE_controller(float accel_limit_cmss, float jerk_limit_cmsss)
 {
     // check for ekf xy position reset
     handle_ekf_NE_reset();
@@ -652,6 +654,8 @@ void AC_PosControl::update_NE_controller()
         }
     }
     _last_update_ne_ticks = AP::scheduler().ticks32();
+
+    const Vector2f previous_accel_ne_cmss = _accel_target_neu_cmss.xy();
 
     float ahrsGndSpdLimit, ahrsControlScaleXY;
     AP::ahrs().getControlLimits(ahrsGndSpdLimit, ahrsControlScaleXY);
@@ -699,6 +703,8 @@ void AC_PosControl::update_NE_controller()
     _accel_target_neu_cmss.xy() = accel_target_ne_cmss;
     _accel_target_neu_cmss.xy() += _accel_desired_neu_cmss.xy() + _accel_offset_neu_cmss.xy();
 
+    const Vector2f raw_accel_ne_cmss = _accel_target_neu_cmss.xy();
+
     // limit acceleration using maximum lean angles
     const float angle_max_rad = MIN(_attitude_control.get_althold_lean_angle_max_rad(), get_lean_angle_max_rad());
     const float accel_max_cmss = angle_rad_to_accel_mss(angle_max_rad) * 100.0;
@@ -712,6 +718,40 @@ void AC_PosControl::update_NE_controller()
     if (!limit_accel_xy(vel_norm_ne, _accel_target_neu_cmss.xy(), accel_max_cmss)) {
         // _accel_target_neu_cmss was not limited so we can zero the xy limit vector
         _limit_vector.xy().zero();
+    }
+
+    if (is_positive(accel_limit_cmss) && is_positive(jerk_limit_cmsss)) {
+        // Limit the complete command, including PID correction and feed-forward.
+        // Slewing between two vectors inside the acceleration circle keeps the
+        // result inside it without independently limiting the N and E axes.
+        Vector2f accel_goal_ne_cmss = _accel_target_neu_cmss.xy();
+        accel_goal_ne_cmss.limit_length(MIN(accel_limit_cmss, accel_max_cmss));
+        Vector2f accel_step_ne_cmss = accel_goal_ne_cmss - previous_accel_ne_cmss;
+        accel_step_ne_cmss.limit_length(jerk_limit_cmsss * MAX(_dt_s, 0.0f));
+        _accel_target_neu_cmss.xy() = previous_accel_ne_cmss + accel_step_ne_cmss;
+
+        // If entry was already outside the requested circle, recover smoothly
+        // without increasing its magnitude. A reduced normal tilt limit takes
+        // priority over jerk continuity; both cannot always be satisfied then.
+        const float recovery_accel_max_cmss = MIN(accel_max_cmss, MAX(accel_limit_cmss, previous_accel_ne_cmss.length()));
+        _accel_target_neu_cmss.xy().limit_length(recovery_accel_max_cmss);
+
+        // Inform both the velocity integrator and reference shaping about the
+        // command that could not be applied, including the jerk restriction.
+        _limit_vector.xy() = raw_accel_ne_cmss - _accel_target_neu_cmss.xy();
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL && HAL_LOGGING_ENABLED
+        // Full-rate final output is needed to verify the per-update jerk bound.
+        // PSC logging is slower and PIDN/PIDE precede the output restrictions.
+        static uint32_t sequence;
+        sequence++;
+        AP::logger().Write("RTLB", "TimeUS,Dt,RawN,RawE,OutN,OutE,PrevN,PrevE,Accel,Jerk,Seq", "QfffffffffI",
+                           AP_HAL::micros64(), _dt_s,
+                           raw_accel_ne_cmss.x * 0.01f, raw_accel_ne_cmss.y * 0.01f,
+                           _accel_target_neu_cmss.x * 0.01f, _accel_target_neu_cmss.y * 0.01f,
+                           previous_accel_ne_cmss.x * 0.01f, previous_accel_ne_cmss.y * 0.01f,
+                           recovery_accel_max_cmss * 0.01f, jerk_limit_cmsss * 0.01f, sequence);
+#endif
     }
 
     // update angle targets that will be passed to stabilize controller

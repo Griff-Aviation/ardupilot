@@ -59,6 +59,9 @@ public:
     /// get_shaping_jerk_NE_cmsss - gets the jerk limit of the ne kinematic path generation in cm/s/s/s
     float get_shaping_jerk_NE_cmsss() const { return _shaping_jerk_ne_msss * 100.0; }
 
+    /// Gets the horizontal shaping jerk after applying the vehicle's angular limits.
+    float get_max_jerk_NE_cmsss() const { return _jerk_max_ne_cmsss; }
+
 
     ///
     /// 3D position shaper
@@ -126,7 +129,8 @@ public:
     ///     The kinematic path is constrained by the maximum acceleration and jerk set using the function set_max_speed_accel_ne.
     ///     The function modifies vel_ne_cms to follow the kinematic trajectory toward accel_cmss.
     ///     The parameter limit_output specifies if the velocity and acceleration limits are applied to the sum of commanded and correction values or just correction.
-    void input_vel_accel_NE_cm(Vector2f& vel_ne_cms, const Vector2f& accel_ne_cmss, bool limit_output = true);
+    /// A positive jerk_limit_cmsss can reduce the shaping jerk for this call only.
+    void input_vel_accel_NE_cm(Vector2f& vel_ne_cms, const Vector2f& accel_ne_cmss, bool limit_output = true, float jerk_limit_cmsss = 0.0f);
 
     /// input_pos_vel_accel_NE_cm - calculate a jerk limited path from the current position, velocity and acceleration to an input position velocity and acceleration.
     ///     The function takes the current position, velocity, and acceleration and calculates the required jerk limited adjustment to the acceleration for the next time dt.
@@ -153,7 +157,9 @@ public:
     ///     Position and velocity errors are converted to velocity and acceleration targets using PID objects
     ///     Desired velocity and accelerations are added to these corrections as they are calculated
     ///     Kinematically consistent target position and desired velocity and accelerations should be provided before calling this function
-    void update_NE_controller();
+    /// Positive acceleration and jerk limits additionally constrain the total output for this call.
+    /// An existing over-limit output recovers at the jerk limit; the normal tilt limit always applies.
+    void update_NE_controller(float accel_limit_cmss = 0.0f, float jerk_limit_cmsss = 0.0f);
 
     ///
     /// Vertical position controller
@@ -332,6 +338,9 @@ public:
 
     // get_accel_target_NEU_cmss - returns the target acceleration in NEU cm/s/s
     const Vector3f& get_accel_target_NEU_cmss() const { return _accel_target_neu_cmss; }
+
+    // Kinematic reference acceleration, before position/velocity correction.
+    const Vector3f& get_accel_desired_NEU_cmss() const { return _accel_desired_neu_cmss; }
 
 
     /// Terrain

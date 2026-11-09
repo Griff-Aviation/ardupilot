@@ -17,8 +17,12 @@ bool ModeRTL::init(bool ignore_checks)
             return false;
         }
     }
-    // initialise waypoint and spline controller
-    wp_nav->wp_and_spline_init_cm(g.rtl_speed_cms);
+    // Airborne RTL starts from the measured velocity, before applying RTL_SPEED.
+    // Keep the stationary/ground initialisation used by the existing RTL path.
+    _brake_on_entry = motors->armed() && !copter.ap.land_complete;
+    if (!_brake_on_entry) {
+        wp_nav->wp_and_spline_init_cm(g.rtl_speed_cms);
+    }
     _state = SubMode::STARTING;
     _state_complete = true; // see run() method below
     terrain_following_allowed = !copter.failsafe.terrain;
@@ -71,8 +75,22 @@ void ModeRTL::run(bool disarm_on_land)
     if (_state_complete) {
         switch (_state) {
         case SubMode::STARTING:
-            build_path();
-            climb_start();
+            if (_brake_on_entry) {
+                if (!entry_brake_start()) {
+                    if (terrain_following_allowed) {
+                        restart_without_terrain();
+                    } else {
+                        copter.set_mode(Mode::Number::LAND, ModeReason::TERRAIN_FAILSAFE);
+                    }
+                    return;
+                }
+            } else {
+                build_path();
+                climb_start();
+            }
+            break;
+        case SubMode::ENTRY_BRAKE:
+            // entry_brake_run performs the handover after both axes settle.
             break;
         case SubMode::INITIAL_CLIMB:
             return_start();
@@ -109,6 +127,10 @@ void ModeRTL::run(bool disarm_on_land)
         climb_return_run();
         break;
 
+    case SubMode::ENTRY_BRAKE:
+        entry_brake_run();
+        break;
+
     case SubMode::LOITER_AT_HOME:
         loiterathome_run();
         break;
@@ -121,6 +143,111 @@ void ModeRTL::run(bool disarm_on_land)
         land_run(disarm_on_land);
         break;
     }
+}
+
+// Brake on entry from either pilot or automatic flight. The reference starts at
+// measured velocity, rather than a stopping point computed with RTL_SPEED.
+bool ModeRTL::entry_brake_start()
+{
+    _brake_accel_cmss = wp_nav->get_wp_acceleration_cmss();
+    const float rtl_speed_cms = g.rtl_speed_cms.get() > 0 ? float(g.rtl_speed_cms.get()) : wp_nav->get_default_speed_NE_cms();
+    const float entry_speed_cms = MAX(pos_control->get_vel_estimate_NEU_cms().xy().length(), rtl_speed_cms);
+    pos_control->set_max_speed_accel_NE_cm(MAX(entry_speed_cms, 10.0f), _brake_accel_cmss);
+    pos_control->set_correction_speed_accel_NE_cm(MAX(entry_speed_cms, 10.0f), _brake_accel_cmss);
+    // Preserve the learned disturbance estimate, not the previous total command
+    // (which also contains Loiter pilot feedforward). The per-call output slew
+    // starts at the old total command and makes the transfer bumpless without
+    // turning that transient into a slowly decaying velocity integrator bias.
+    const bool ne_was_active = pos_control->is_active_NE();
+    const Vector2f integrator_ne_cmss = pos_control->get_vel_NE_pid().get_i();
+    pos_control->init_NE_controller();
+    if (ne_was_active) {
+        pos_control->get_vel_NE_pid().set_integrator(integrator_ne_cmss);
+    }
+    _brake_jerk_cmsss = pos_control->get_max_jerk_NE_cmsss();
+    if (!is_positive(_brake_jerk_cmsss)) {
+        // Keep the entry output limiter enabled even with an invalid zero PSC
+        // jerk setting. This fallback does not change the stored PSC parameter.
+        _brake_jerk_cmsss = 100.0f;
+    }
+    if (is_positive(wp_nav->get_wp_jerk_msss())) {
+        _brake_jerk_cmsss = MIN(_brake_jerk_cmsss, wp_nav->get_wp_jerk_msss() * 100.0f);
+    }
+
+    pos_control->set_max_speed_accel_U_cm(-wp_nav->get_default_speed_down_cms(), wp_nav->get_default_speed_up_cms(), wp_nav->get_accel_U_cmss());
+    pos_control->set_correction_speed_accel_U_cmss(-wp_nav->get_default_speed_down_cms(), wp_nav->get_default_speed_up_cms(), wp_nav->get_accel_U_cmss());
+    pos_control->init_U_controller_stopping_point();
+    // Calculate the normal RTL altitude, including cone, rally, fence and terrain
+    // policy. Climb concurrently with the horizontal stop; do not delay it.
+    build_path();
+    Vector3f climb_neu_cm;
+    if (!wp_nav->get_vector_NEU_cm(rtl_path.climb_target, climb_neu_cm, _brake_terrain_alt)) {
+        return false;
+    }
+    float terrain_u_cm = 0.0f;
+    if (_brake_terrain_alt && !wp_nav->get_terrain_offset_cm(terrain_u_cm)) {
+        return false;
+    }
+    pos_control->init_pos_terrain_U_cm(terrain_u_cm);
+    _brake_alt_u_cm = climb_neu_cm.z;
+    _brake_settled_ms = 0;
+    _state = SubMode::ENTRY_BRAKE;
+    _state_complete = false;
+    auto_yaw.set_mode(AutoYaw::Mode::HOLD);
+    return true;
+}
+
+void ModeRTL::entry_brake_run()
+{
+    if (is_disarmed_or_landed()) {
+        make_safe_ground_handling();
+        return;
+    }
+    motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
+
+    float terrain_u_cm = 0.0f;
+    const bool terrain_ok = !_brake_terrain_alt || wp_nav->get_terrain_offset_cm(terrain_u_cm);
+    copter.failsafe_terrain_set_status(terrain_ok);
+    if (terrain_ok) {
+        pos_control->set_pos_terrain_target_U_cm(terrain_u_cm);
+        pos_control->set_alt_target_with_slew_cm(_brake_alt_u_cm);
+    }
+
+    Vector2f velocity_cms;
+    pos_control->input_vel_accel_NE_cm(velocity_cms, Vector2f{}, true, _brake_jerk_cmsss);
+    // Optional per-call limits cannot leak into normal Loiter, Auto or SmartRTL.
+    pos_control->update_NE_controller(_brake_accel_cmss, _brake_jerk_cmsss);
+    pos_control->update_U_controller();
+    attitude_control->input_thrust_vector_heading(pos_control->get_thrust_vector(), auto_yaw.get_heading());
+
+    const bool settled = terrain_ok &&
+        pos_control->get_vel_estimate_NEU_cms().xy().length() < 25.0f &&
+        pos_control->get_vel_desired_NEU_cms().xy().length() < 10.0f &&
+        pos_control->get_accel_desired_NEU_cmss().xy().length() < 10.0f &&
+        fabsf(pos_control->get_pos_error_U_cm()) < 50.0f &&
+        fabsf(pos_control->get_pos_desired_NEU_cm().z - _brake_alt_u_cm) < 50.0f &&
+        fabsf(pos_control->get_accel_desired_NEU_cmss().z) < 10.0f &&
+        fabsf(pos_control->get_vel_estimate_NEU_cms().z) < 30.0f &&
+        fabsf(pos_control->get_vel_desired_NEU_cms().z) < 10.0f;
+    if (!settled) {
+        _brake_settled_ms = 0;
+        return;
+    }
+    if (_brake_settled_ms == 0) {
+        _brake_settled_ms = millis();
+    }
+    if (millis() - _brake_settled_ms < 500U) {
+        return;
+    }
+
+    // The goal is to stop where braking is achievable, not to recover a residual
+    // error to the integrated braking reference (which can persist with wind/I
+    // bias). WPNav reinitialises at the actual stopping point and preserves the
+    // total output for a bumpless handover.
+    // The initial climb has already completed. Keep its original return altitude
+    // (in particular do not apply RTL_CLIMB_MIN a second time).
+    wp_nav->wp_and_spline_init_cm(g.rtl_speed_cms);
+    return_start();
 }
 
 // rtl_climb_start - initialise climb to RTL altitude
@@ -517,6 +644,9 @@ bool ModeRTL::get_wp(Location& destination) const
 {
     // provide target in states which use wp_nav
     switch (_state) {
+    case SubMode::ENTRY_BRAKE:
+        destination = rtl_path.climb_target;
+        return true;
     case SubMode::STARTING:
     case SubMode::INITIAL_CLIMB:
     case SubMode::RETURN_HOME:
@@ -533,11 +663,17 @@ bool ModeRTL::get_wp(Location& destination) const
 
 float ModeRTL::wp_distance_m() const
 {
+    if (_state == SubMode::ENTRY_BRAKE) {
+        return pos_control->get_pos_error_NE_cm() * 0.01f;
+    }
     return wp_nav->get_wp_distance_to_destination_cm() * 0.01f;
 }
 
 float ModeRTL::wp_bearing_deg() const
 {
+    if (_state == SubMode::ENTRY_BRAKE) {
+        return degrees(pos_control->get_bearing_to_target_rad());
+    }
     return degrees(wp_nav->get_wp_bearing_to_destination_rad());
 }
 

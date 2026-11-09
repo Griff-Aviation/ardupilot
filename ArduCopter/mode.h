@@ -1486,7 +1486,8 @@ public:
         RETURN_HOME,
         LOITER_AT_HOME,
         FINAL_DESCENT,
-        LAND
+        LAND,
+        ENTRY_BRAKE
     };
     SubMode state() { return _state; }
 
@@ -1512,7 +1513,9 @@ protected:
     // for reporting to GCS
     float wp_distance_m() const override;
     float wp_bearing_deg() const override;
-    float crosstrack_error() const override { return wp_nav->crosstrack_error();}
+    float crosstrack_error() const override {
+        return _state == SubMode::ENTRY_BRAKE ? pos_control->crosstrack_error() : wp_nav->crosstrack_error();
+    }
 
     void descent_start();
     void descent_run();
@@ -1523,6 +1526,8 @@ protected:
 
 private:
 
+    bool entry_brake_start();
+    void entry_brake_run();
     void climb_start();
     void return_start();
     void climb_return_run();
@@ -1533,6 +1538,13 @@ private:
 
     SubMode _state = SubMode::INITIAL_CLIMB;  // records state of rtl (initial climb, returning home, etc)
     bool _state_complete = false; // set to true if the current state is completed
+
+    bool _brake_on_entry = false;
+    bool _brake_terrain_alt = false;
+    float _brake_alt_u_cm = 0.0f;
+    float _brake_accel_cmss = 0.0f;
+    float _brake_jerk_cmsss = 0.0f;
+    uint32_t _brake_settled_ms = 0;
 
     struct {
         // NEU w/ Z element alt-above-ekf-origin unless use_terrain is true in which case Z element is alt-above-terrain

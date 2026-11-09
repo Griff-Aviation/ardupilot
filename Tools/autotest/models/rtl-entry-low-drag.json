@@ -1,0 +1,15 @@
+{
+    "mass": 3.0,
+    "diagonal_size": 0.35,
+    "refSpd": 15.0,
+    "refAngle": 8.0,
+    "refVoltage": 12.09,
+    "refCurrent": 29.3,
+    "refAlt": 584.0,
+    "refTempC": 25.0,
+    "maxVoltage": 12.6,
+    "battCapacityAh": 0.0,
+    "hoverThrOut": 0.39,
+    "propExpo": 0.65,
+    "mdrag_coef": 0.02
+}
