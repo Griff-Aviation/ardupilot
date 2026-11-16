@@ -1,46 +1,37 @@
-name: Build ArduPilot
+name: Build ArduPilot for CubeOrangePlus
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [master]
   pull_request:
-    branches: [ main, master ]
+    branches: [master]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout repository
+      - name: Check out source and submodules
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # ArduPilot uses submodules
+          submodules: recursive
 
-      - name: Sync ArduPilot submodules
-        run: |
-          git submodule sync --recursive
-          git submodule update --init --recursive
-          # Or use ArduPilot's helper script, equivalent but "official":
-          # ./Tools/gittools/submodule-sync.sh
+      - name: Install ArduPilot build dependencies
+        run: Tools/environment_install/install-prereqs-ubuntu.sh -y
 
-      - name: Install build dependencies
+      - name: Build ArduCopter
         run: |
-          Tools/environment_install/install-prereqs-ubuntu.sh -y
-          . ~/.profile
-          # Optional: for faster builds
-          echo 'export PATH="/usr/lib/ccache:$PATH"' | tee -a $GITHUB_ENV
-
-      - name: Configure waf
-        run: |
+          source "$HOME/.profile"
+          export PATH="/usr/lib/ccache:$PATH"
+          command -v arm-none-eabi-ar
           ./waf configure --board CubeOrangePlus
-
-      - name: Build Copter
-        run: |
           ./waf copter
 
-      - name: Upload build artifacts
+      - name: Upload flashable firmware
         uses: actions/upload-artifact@v4
         with:
-          name: ardupilot-copter-CubeOrangePlus
-          path: |
-            build/CubeOrangePlus/bin/*
+          name: arducopter-CubeOrangePlus
+          path: build/CubeOrangePlus/bin/arducopter.apj
+          if-no-files-found: error
