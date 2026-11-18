@@ -112,6 +112,9 @@ protected:
     // check for failed motor
     void                check_for_failed_motor(float throttle_thrust_best);
 
+    // move collective between the OctaQuad X motor layers (MOT_OQ_BIAS)
+    void                apply_octaquad_bias(float collective, bool thrust_boost_allocated);
+
     // add_motor using just position and yaw_factor (or prop direction)
     void                add_motor(int8_t motor_num, float angle_degrees, float yaw_factor, uint8_t testing_order);
 
@@ -151,6 +154,13 @@ protected:
 
     motor_frame_class   _active_frame_class; // active frame class (i.e. quad, hexa, octa, etc)
     motor_frame_type    _active_frame_type;  // active frame type (i.e. plus, x, v, etc)
+
+    // OctaQuad X layer bias, cached from MOT_OQ_BIAS at init
+    bool                _oq_bias_supported = false; // frame is OctaQuad X
+    bool                _oq_bias_config_ok = true;  // configured bias is finite and within -1..1
+    float               _oq_bias_active = 0.0f;     // bias in use, 0 when unsupported or invalid
+    float               _oq_bias_collective = 0.0f; // collective the last transfer was computed from
+    float               _oq_bias_transfer = 0.0f;   // collective moved to motors 1-4 in the last output, 0 when suppressed
 
     const char*         _frame_class_string = ""; // string representation of frame class
     const char*         _frame_type_string = "";  //  string representation of frame type

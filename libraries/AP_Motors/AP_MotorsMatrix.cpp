@@ -34,6 +34,12 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
     // setup the motors
     setup_motors(frame_class, frame_type);
 
+    // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot)
+    const float oq_bias = _oq_bias.get();
+    _oq_bias_supported = (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
+    _oq_bias_config_ok = !_oq_bias_supported || (isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f);
+    _oq_bias_active = (_oq_bias_supported && _oq_bias_config_ok) ? oq_bias : 0.0f;
+
     // enable fast channels or instant pwm
     set_update_rate(_speed_hz);
 }
@@ -401,8 +407,62 @@ void AP_MotorsMatrix::output_armed_stabilizing()
     // compensation_gain can never be zero
     _throttle_out = throttle_thrust_best_plus_adj / compensation_gain;
 
-    // check for failed motor
+    // check for failed motor, on the outputs before any layer bias so that
+    // a deliberate bias is not mistaken for a motor imbalance. The check can
+    // clear _thrust_boost, so keep whether this cycle was allocated with it.
+    const bool thrust_boost_allocated = _thrust_boost;
     check_for_failed_motor(throttle_thrust_best_plus_adj);
+
+    apply_octaquad_bias(throttle_thrust_best_plus_adj, thrust_boost_allocated);
+}
+
+// move collective from one OctaQuad X motor layer to the other (MOT_OQ_BIAS)
+//   collective is the throttle the outputs were just allocated with.
+//   Motors 1-4 receive +transfer and motors 5-8 -transfer, with
+//   transfer = bias * collective reduced as needed to keep every motor within
+//   0..1. On this frame each layer's roll, pitch and yaw factors sum to zero,
+//   so the transfer leaves the allocated roll, pitch, yaw and average
+//   collective unchanged. No transfer outside full spool-up, or when this
+//   cycle's outputs were allocated with thrust boost or boost still has a
+//   share of the allocation.
+void AP_MotorsMatrix::apply_octaquad_bias(float collective, bool thrust_boost_allocated)
+{
+    _oq_bias_collective = collective;
+    _oq_bias_transfer = 0.0f;
+    if (is_zero(_oq_bias_active) || _spool_state != SpoolState::THROTTLE_UNLIMITED ||
+        thrust_boost_allocated || is_positive(_thrust_boost_ratio)) {
+        return;
+    }
+
+    // the transfer range that keeps every motor within 0..1
+    float lo = -1.0f;
+    float hi = 1.0f;
+    for (uint8_t i = 0; i < 8; i++) {
+        if (!motor_enabled[i]) {
+            continue;
+        }
+        const float out = _thrust_rpyt_out[i];
+        if (i < 4) {
+            lo = MAX(lo, -out);
+            hi = MIN(hi, 1.0f - out);
+        } else {
+            lo = MAX(lo, out - 1.0f);
+            hi = MIN(hi, out);
+        }
+    }
+    const float requested = _oq_bias_active * collective;
+    if (!isfinite(requested) || !(lo <= 0.0f && hi >= 0.0f)) {
+        // the unbiased outputs are not all within range: leave them alone
+        return;
+    }
+    const float transfer = constrain_float(requested, lo, hi);
+
+    for (uint8_t i = 0; i < 8; i++) {
+        if (motor_enabled[i]) {
+            _thrust_rpyt_out[i] += (i < 4) ? transfer : -transfer;
+        }
+    }
+    _oq_bias_transfer = transfer;
 }
 
 // check for failed motor
