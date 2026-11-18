@@ -58,6 +58,11 @@ public:
     // output_to_motors - sends minimum values out to the motors
     virtual void        output_to_motors() override;
 
+#if HAL_LOGGING_ENABLED
+    // 10hz logging: MOTB, plus OQBI when MOT_OQ_BIAS is in use
+    void                Log_Write() override;
+#endif
+
     // pre-arm checks, including the MOT_OQ_BIAS configuration
     bool                arming_checks(size_t buflen, char *buffer) const override;
 

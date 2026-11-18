@@ -15,6 +15,7 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include "AP_MotorsMatrix.h"
+#include <AP_Logger/AP_Logger.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
 extern const AP_HAL::HAL& hal;
@@ -429,6 +430,30 @@ bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
     }
     return true;
 }
+
+#if HAL_LOGGING_ENABLED
+void AP_MotorsMatrix::Log_Write()
+{
+    AP_MotorsMulticopter::Log_Write();
+
+    if (is_zero(_oq_bias_active)) {
+        return;
+    }
+    // @LoggerMessage: OQBI
+    // @Description: OctaQuad upper/lower collective bias (MOT_OQ_BIAS)
+    // @Field: TimeUS: Time since system startup
+    // @Field: Req: Bias in use, as configured
+    // @Field: Eff: Bias actually applied: transfer divided by collective; less than Req when limited by motor range, 0 when suppressed
+    // @Field: Col: Collective the transfer was computed from
+    // @Field: Xfer: Collective command moved to motors 1-4 and taken from motors 5-8
+    AP::logger().WriteStreaming("OQBI", "TimeUS,Req,Eff,Col,Xfer", "s----", "F----", "Qffff",
+                                AP_HAL::micros64(),
+                                _oq_bias_active,
+                                is_positive(_oq_bias_collective) ? _oq_bias_transfer / _oq_bias_collective : 0.0f,
+                                _oq_bias_collective,
+                                _oq_bias_transfer);
+}
+#endif
 
 // move collective from one OctaQuad X motor layer to the other (MOT_OQ_BIAS)
 //   collective is the throttle the outputs were just allocated with.
