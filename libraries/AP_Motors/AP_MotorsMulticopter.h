@@ -181,6 +181,9 @@ protected:
     // scaling for booster motor throttle
     AP_Float            _boost_scale;
 
+    // OctaQuad X upper/lower collective bias (used by AP_MotorsMatrix)
+    AP_Float            _oq_bias;
+
     // motor output variables
     bool                motor_enabled[AP_MOTORS_MAX_NUM_MOTORS];    // true if motor is enabled
 

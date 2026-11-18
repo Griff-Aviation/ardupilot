@@ -231,6 +231,15 @@ const AP_Param::GroupInfo AP_MotorsMulticopter::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("SPOOL_TIM_DN", 44, AP_MotorsMulticopter, _spool_down_time, 0),
 
+    // @Param: OQ_BIAS
+    // @DisplayName: OctaQuad upper/lower collective bias
+    // @Description: Moves collective command between the two motor layers of an OctaQuad X frame (FRAME_CLASS 4, FRAME_TYPE 1). Positive values give motors 1-4 more collective and motors 5-8 less; negative values do the reverse. With collective c, motors 1-4 are commanded c*(1+bias) and motors 5-8 c*(1-bias) before the thrust curve is applied, so this is a command split, not a guaranteed thrust or power split. Roll, pitch and yaw corrections are not scaled. The bias is reduced automatically when a motor would leave its output range, and is not applied during motor-loss thrust boost or outside full spool-up. Ignored on other frames. 0 disables.
+    // @Range: -1 1
+    // @Increment: 0.05
+    // @RebootRequired: True
+    // @User: Advanced
+    AP_GROUPINFO("OQ_BIAS", 60, AP_MotorsMulticopter, _oq_bias, 0),
+
     AP_GROUPEND
 };
 
