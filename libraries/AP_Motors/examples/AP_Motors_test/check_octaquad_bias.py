@@ -29,9 +29,15 @@ TOL = 2e-4  # the sweep prints commands to 4 decimals
 def rows(path):
     with open(path) as f:
         lines = f.read().splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith('Roll,'))
-    header = lines[start - 1]
-    boost = 'True' in header
+    start = next((i for i, line in enumerate(lines) if line.startswith('Roll,')), None)
+    if start is None:
+        sys.exit('%s: no "Roll," header; not an AP_Motors_test stability sweep' % path)
+    boost = None
+    for line in lines[:start]:
+        if line.startswith('Thrust boost:'):
+            boost = line.split(':', 1)[1].strip() == 'True'
+    if boost is None:
+        sys.exit('%s: no "Thrust boost:" line before the header' % path)
     return boost, list(csv.DictReader(lines[start:]))
 
 
