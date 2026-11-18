@@ -89,6 +89,15 @@ void setup()
             } else if (strcmp(cmd,"thrust_boost") == 0) {
                 thrust_boost = value > 0.0;
 
+            } else if (strcmp(cmd,"oq_bias") == 0) {
+                if (motors_matrix != nullptr) {
+                    // the bias is read at init
+                    motors_matrix->set_oq_bias(value);
+                    motors->init(frame_class, AP_Motors::MOTOR_FRAME_TYPE_X);
+                } else {
+                    ::printf("frame_class = %d does not accept oq_bias commands\n", frame_class);
+                }
+
             } else if (strcmp(cmd,"swash") == 0) {
                 if (frame_class == AP_Motors::MOTOR_FRAME_HELI) {
                     // This is a extremely complicated and unsafe way to get at the swash type parameter

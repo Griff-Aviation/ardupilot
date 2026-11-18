@@ -40,6 +40,9 @@ public:
     // set_yaw_headroom - set yaw headroom (yaw is given at least this amount of pwm)
     void                set_yaw_headroom(int16_t pwm) { _yaw_headroom.set(pwm); }
 
+    // set_oq_bias - set MOT_OQ_BIAS; it takes effect at the next init
+    void                set_oq_bias(float bias) { _oq_bias.set(bias); }
+
     // update_throttle_range - update throttle endpoints
     void                update_throttle_range();
 
