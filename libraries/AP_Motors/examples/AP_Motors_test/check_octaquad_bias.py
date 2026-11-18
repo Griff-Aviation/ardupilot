@@ -50,7 +50,7 @@ def main():
     norm = ['Mot%d_norm' % i for i in range(1, 9)]
     flags = ['LimR', 'LimP', 'LimY', 'LimThD', 'LimThU']
     failures = 0
-    full = limited = 0
+    full = limited = unchanged = 0
     for n, (b, r) in enumerate(zip(base, biased)):
         key = [r['Roll'], r['Pitch'], r['Yaw'], r['Thr']]
         if key != [b['Roll'], b['Pitch'], b['Yaw'], b['Thr']]:
@@ -70,7 +70,7 @@ def main():
                 if failures <= 10:
                     print('row %d %s: %s' % (n, key, '; '.join(problems)))
             else:
-                full += 1
+                unchanged += 1
             continue
         if any(abs(diff[i] - d) > TOL for i in range(4)) or any(abs(diff[i] + d) > TOL for i in range(4, 8)):
             problems.append('layers moved unevenly %s' % diff)
@@ -94,7 +94,10 @@ def main():
             failures += 1
             if failures <= 10:
                 print('row %d %s: %s' % (n, key, '; '.join(problems)))
-    print('%d rows: %d full transfer, %d bound-limited, %d failures' % (len(base), full, limited, failures))
+    if bias_boost:
+        print('%d rows (thrust boost): %d unchanged, %d failures' % (len(base), unchanged, failures))
+    else:
+        print('%d rows: %d full transfer, %d bound-limited, %d failures' % (len(base), full, limited, failures))
     sys.exit(1 if failures else 0)
 
 
