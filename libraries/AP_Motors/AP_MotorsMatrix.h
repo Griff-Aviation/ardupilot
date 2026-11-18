@@ -58,6 +58,9 @@ public:
     // output_to_motors - sends minimum values out to the motors
     virtual void        output_to_motors() override;
 
+    // pre-arm checks, including the MOT_OQ_BIAS configuration
+    bool                arming_checks(size_t buflen, char *buffer) const override;
+
     // get_motor_mask - returns a bitmask of which outputs are being used for motors (1 means being used)
     //  this can be used to ensure other pwm outputs (i.e. for servos) do not conflict
     uint32_t            get_motor_mask() override;

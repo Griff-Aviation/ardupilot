@@ -416,6 +416,20 @@ void AP_MotorsMatrix::output_armed_stabilizing()
     apply_octaquad_bias(throttle_thrust_best_plus_adj, thrust_boost_allocated);
 }
 
+// pre-arm checks: an OctaQuad X frame refuses to arm with a MOT_OQ_BIAS that
+// is not a number within -1..1 (it is then not applied)
+bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
+{
+    if (!AP_MotorsMulticopter::arming_checks(buflen, buffer)) {
+        return false;
+    }
+    if (!_oq_bias_config_ok) {
+        hal.util->snprintf(buffer, buflen, "OQ_BIAS must be within -1 to 1");
+        return false;
+    }
+    return true;
+}
+
 // move collective from one OctaQuad X motor layer to the other (MOT_OQ_BIAS)
 //   collective is the throttle the outputs were just allocated with.
 //   Motors 1-4 receive +transfer and motors 5-8 -transfer, with
