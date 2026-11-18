@@ -420,13 +420,16 @@ void AP_MotorsMatrix::output_armed_stabilizing()
 }
 
 // pre-arm checks: an OctaQuad X frame refuses to arm with a MOT_OQ_BIAS that
-// is not a number within -1..1 (it is then not applied)
+// is not a number within -1..1, whether it was set before boot (it is then
+// not applied) or changed since (it would be applied at the next boot)
 bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
 {
     if (!AP_MotorsMulticopter::arming_checks(buflen, buffer)) {
         return false;
     }
-    if (!_oq_bias_config_ok) {
+    const float oq_bias = _oq_bias.get();
+    const bool stored_ok = !_oq_bias_supported || (isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f);
+    if (!_oq_bias_config_ok || !stored_ok) {
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
         hal.util->snprintf(buffer, buflen, "Q_M_OQ_BIAS must be -1..1");
 #else
