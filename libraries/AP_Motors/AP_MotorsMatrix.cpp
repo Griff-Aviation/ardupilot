@@ -473,13 +473,17 @@ void AP_MotorsMatrix::apply_octaquad_bias(float collective, bool thrust_boost_al
         return;
     }
 
+    // the transfer is only balanced (net zero) with all eight motors in use
+    for (uint8_t i = 0; i < 8; i++) {
+        if (!motor_enabled[i]) {
+            return;
+        }
+    }
+
     // the transfer range that keeps every motor within 0..1
     float lo = -1.0f;
     float hi = 1.0f;
     for (uint8_t i = 0; i < 8; i++) {
-        if (!motor_enabled[i]) {
-            continue;
-        }
         const float out = _thrust_rpyt_out[i];
         if (i < 4) {
             lo = MAX(lo, -out);
@@ -497,9 +501,7 @@ void AP_MotorsMatrix::apply_octaquad_bias(float collective, bool thrust_boost_al
     const float transfer = constrain_float(requested, lo, hi);
 
     for (uint8_t i = 0; i < 8; i++) {
-        if (motor_enabled[i]) {
-            _thrust_rpyt_out[i] += (i < 4) ? transfer : -transfer;
-        }
+        _thrust_rpyt_out[i] += (i < 4) ? transfer : -transfer;
     }
     _oq_bias_transfer = transfer;
 }
