@@ -174,6 +174,7 @@ void setup()
                     case AP_Motors::MOTOR_FRAME_QUAD:
                     case AP_Motors::MOTOR_FRAME_HEXA:
                     case AP_Motors::MOTOR_FRAME_OCTA:
+                    case AP_Motors::MOTOR_FRAME_OCTAQUAD:
                         motors_matrix = new AP_MotorsMatrix(400);
                         motors = motors_matrix;
                         break;
