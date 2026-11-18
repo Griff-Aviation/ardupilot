@@ -90,12 +90,14 @@ void setup()
                 thrust_boost = value > 0.0;
 
             } else if (strcmp(cmd,"oq_bias") == 0) {
-                if (motors_matrix != nullptr) {
+                // the bias only acts on OctaQuad X, the frame type this harness uses
+                if (frame_class == AP_Motors::MOTOR_FRAME_OCTAQUAD && motors_matrix != nullptr) {
                     // the bias is read at init
                     motors_matrix->set_oq_bias(value);
                     motors->init(frame_class, AP_Motors::MOTOR_FRAME_TYPE_X);
                 } else {
-                    ::printf("frame_class = %d does not accept oq_bias commands\n", frame_class);
+                    ::printf("oq_bias needs frame_class=%d (OctaQuad), got %d\n", AP_Motors::MOTOR_FRAME_OCTAQUAD, frame_class);
+                    exit(1);
                 }
 
             } else if (strcmp(cmd,"swash") == 0) {
