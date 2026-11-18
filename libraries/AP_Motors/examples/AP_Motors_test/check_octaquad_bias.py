@@ -41,8 +41,17 @@ def rows(path):
     return boost, list(csv.DictReader(lines[start:]))
 
 
+USAGE = 'usage: check_octaquad_bias.py <unbiased.csv> <biased.csv> <bias>'
+
+
 def main():
-    base_path, bias_path, bias = sys.argv[1], sys.argv[2], float(sys.argv[3])
+    if len(sys.argv) != 4:
+        sys.exit(USAGE)
+    base_path, bias_path = sys.argv[1], sys.argv[2]
+    try:
+        bias = float(sys.argv[3])
+    except ValueError:
+        sys.exit('bias must be a number\n' + USAGE)
     base_boost, base = rows(base_path)
     bias_boost, biased = rows(bias_path)
     if base_boost != bias_boost or len(base) != len(biased):
