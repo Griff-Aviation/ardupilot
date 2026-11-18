@@ -427,7 +427,11 @@ bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
         return false;
     }
     if (!_oq_bias_config_ok) {
-        hal.util->snprintf(buffer, buflen, "OQ_BIAS must be within -1 to 1");
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+        hal.util->snprintf(buffer, buflen, "Q_M_OQ_BIAS must be -1..1");
+#else
+        hal.util->snprintf(buffer, buflen, "MOT_OQ_BIAS must be -1..1");
+#endif
         return false;
     }
     return true;
