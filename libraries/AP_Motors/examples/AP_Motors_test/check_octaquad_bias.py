@@ -88,7 +88,7 @@ def main():
         if abs(sum(v) - sum(u)) > 8 * TOL:
             problems.append('collective changed %.4f -> %.4f' % (sum(u), sum(v)))
         if d * want < -TOL or abs(d) > abs(want) + TOL:
-            problems.append('transfer %.4f outside 0..%.4f' % (d, want))
+            problems.append('transfer %.4f outside [%.4f, %.4f]' % (d, min(want, 0.0), max(want, 0.0)))
         at_bound = any(x < TOL or x > 1 - TOL for x in v)
         if abs(d - want) > TOL:
             if at_bound:
