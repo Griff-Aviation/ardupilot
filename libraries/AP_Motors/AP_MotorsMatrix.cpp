@@ -29,6 +29,13 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
     _active_frame_class = frame_class;
     _active_frame_type = frame_type;
 
+    // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot).
+    // Done for every frame class, so a switch to a scripting frame clears it
+    const float oq_bias = _oq_bias.get();
+    _oq_bias_supported = (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
+    const bool oq_bias_ok = isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f;
+    _oq_bias_active = (_oq_bias_supported && oq_bias_ok) ? oq_bias : 0.0f;
+
     if (frame_class == MOTOR_FRAME_SCRIPTING_MATRIX) {
         // if Scripting frame class, do nothing scripting must call its own dedicated init function
         return;
@@ -36,12 +43,6 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
 
     // setup the motors
     setup_motors(frame_class, frame_type);
-
-    // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot)
-    const float oq_bias = _oq_bias.get();
-    _oq_bias_supported = (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
-    const bool oq_bias_ok = isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f;
-    _oq_bias_active = (_oq_bias_supported && oq_bias_ok) ? oq_bias : 0.0f;
 
     // enable fast channels or instant pwm
     set_update_rate(_speed_hz);
