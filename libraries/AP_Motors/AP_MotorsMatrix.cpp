@@ -22,6 +22,9 @@
 
 extern const AP_HAL::HAL& hal;
 
+// MOT_OQ_BIAS is an ArduCopter feature; examples (build type unknown) keep it for testing
+#define AP_MOTORS_OQ_BIAS_VEHICLE (APM_BUILD_TYPE(APM_BUILD_ArduCopter) || APM_BUILD_TYPE(APM_BUILD_UNKNOWN))
+
 // init
 void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame_type)
 {
@@ -32,7 +35,8 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
     // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot).
     // Done for every frame class, so a switch to a scripting frame clears it
     const float oq_bias = _oq_bias.get();
-    _oq_bias_supported = (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
+    _oq_bias_supported = AP_MOTORS_OQ_BIAS_VEHICLE &&
+                         (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
     const bool oq_bias_ok = isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f;
     _oq_bias_active = (_oq_bias_supported && oq_bias_ok) ? oq_bias : 0.0f;
 
@@ -431,11 +435,7 @@ bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
     }
     const float oq_bias = _oq_bias.get();
     if (_oq_bias_supported && !(isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f)) {
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-        hal.util->snprintf(buffer, buflen, "Q_M_OQ_BIAS must be -1..1");
-#else
         hal.util->snprintf(buffer, buflen, "MOT_OQ_BIAS must be -1..1");
-#endif
         return false;
     }
     return true;

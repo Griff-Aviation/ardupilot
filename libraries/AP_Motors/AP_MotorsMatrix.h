@@ -164,7 +164,7 @@ protected:
     motor_frame_type    _active_frame_type;  // active frame type (i.e. plus, x, v, etc)
 
     // OctaQuad X layer bias, cached from MOT_OQ_BIAS at init
-    bool                _oq_bias_supported = false; // frame is OctaQuad X
+    bool                _oq_bias_supported = false; // ArduCopter with the OctaQuad X frame
     float               _oq_bias_active = 0.0f;     // bias in use, 0 when unsupported or invalid
     float               _oq_bias_collective = 0.0f; // collective the last transfer was computed from
     float               _oq_bias_transfer = 0.0f;   // collective moved to motors 1-4 in the last output, 0 when suppressed
