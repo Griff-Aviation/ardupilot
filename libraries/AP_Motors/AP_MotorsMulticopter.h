@@ -40,6 +40,9 @@ public:
     // set_yaw_headroom - set yaw headroom (yaw is given at least this amount of pwm)
     void                set_yaw_headroom(int16_t pwm) { _yaw_headroom.set(pwm); }
 
+    // set_oq_bias - set MOT_OQ_BIAS; it takes effect at the next init
+    void                set_oq_bias(float bias) { _oq_bias.set(bias); }
+
     // update_throttle_range - update throttle endpoints
     void                update_throttle_range();
 
@@ -180,6 +183,9 @@ protected:
 
     // scaling for booster motor throttle
     AP_Float            _boost_scale;
+
+    // OctaQuad X upper/lower collective bias (used by AP_MotorsMatrix)
+    AP_Float            _oq_bias;
 
     // motor output variables
     bool                motor_enabled[AP_MOTORS_MAX_NUM_MOTORS];    // true if motor is enabled

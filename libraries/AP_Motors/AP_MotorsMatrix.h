@@ -58,6 +58,14 @@ public:
     // output_to_motors - sends minimum values out to the motors
     virtual void        output_to_motors() override;
 
+#if HAL_LOGGING_ENABLED
+    // 10hz logging: MOTB, plus OQBI when MOT_OQ_BIAS is in use
+    void                Log_Write() override;
+#endif
+
+    // pre-arm checks, including the MOT_OQ_BIAS configuration
+    bool                arming_checks(size_t buflen, char *buffer) const override;
+
     // get_motor_mask - returns a bitmask of which outputs are being used for motors (1 means being used)
     //  this can be used to ensure other pwm outputs (i.e. for servos) do not conflict
     uint32_t            get_motor_mask() override;
@@ -112,6 +120,9 @@ protected:
     // check for failed motor
     void                check_for_failed_motor(float throttle_thrust_best);
 
+    // move collective between the OctaQuad X motor layers (MOT_OQ_BIAS)
+    void                apply_octaquad_bias(float collective, bool thrust_boost_allocated);
+
     // add_motor using just position and yaw_factor (or prop direction)
     void                add_motor(int8_t motor_num, float angle_degrees, float yaw_factor, uint8_t testing_order);
 
@@ -151,6 +162,12 @@ protected:
 
     motor_frame_class   _active_frame_class; // active frame class (i.e. quad, hexa, octa, etc)
     motor_frame_type    _active_frame_type;  // active frame type (i.e. plus, x, v, etc)
+
+    // OctaQuad X layer bias, cached from MOT_OQ_BIAS at init
+    bool                _oq_bias_supported = false; // ArduCopter with the OctaQuad X frame
+    float               _oq_bias_active = 0.0f;     // bias in use, 0 when unsupported or invalid
+    float               _oq_bias_collective = 0.0f; // collective the last transfer was computed from
+    float               _oq_bias_transfer = 0.0f;   // collective moved to motors 1-4 in the last output, 0 when suppressed
 
     const char*         _frame_class_string = ""; // string representation of frame class
     const char*         _frame_type_string = "";  //  string representation of frame type

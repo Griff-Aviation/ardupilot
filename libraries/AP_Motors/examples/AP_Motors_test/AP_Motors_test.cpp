@@ -55,6 +55,9 @@ void setup()
     // default to quad frame class, frame class can be changed by argument in parser below
     AP_Motors::motor_frame_class frame_class = AP_Motors::MOTOR_FRAME_QUAD;
 
+    // frame type the matrix frames are initialised with
+    const AP_Motors::motor_frame_type frame_type = AP_Motors::MOTOR_FRAME_TYPE_X;
+
     // Parse the command line arguments
     uint8_t argc;
     char * const *argv;
@@ -88,6 +91,39 @@ void setup()
 
             } else if (strcmp(cmd,"thrust_boost") == 0) {
                 thrust_boost = value > 0.0;
+
+            } else if (strcmp(cmd,"oq_bias") == 0) {
+                // the bias only acts on OctaQuad X
+                if (frame_class == AP_Motors::MOTOR_FRAME_OCTAQUAD && frame_type == AP_Motors::MOTOR_FRAME_TYPE_X &&
+                    motors_matrix != nullptr) {
+                    // the bias is read at init: re-initialise with the same class and type
+                    motors_matrix->set_oq_bias(value);
+                    motors->init(frame_class, frame_type);
+                } else {
+                    ::printf("oq_bias needs frame_class=%d (OctaQuad) and frame type X, got class %d type %d\n",
+                             AP_Motors::MOTOR_FRAME_OCTAQUAD, frame_class, frame_type);
+                    exit(1);
+                }
+
+            } else if (strcmp(cmd,"scripting_frame") == 0) {
+#if AP_SCRIPTING_ENABLED
+                // switch the current matrix to the scripting frame class without a restart, as a
+                // FRAME_CLASS change does, then finish its init expecting value motors. The
+                // motors already set up are kept, as no script removes them.
+                if (motors_matrix == nullptr) {
+                    ::printf("scripting_frame needs a matrix frame_class first\n");
+                    exit(1);
+                }
+                frame_class = AP_Motors::MOTOR_FRAME_SCRIPTING_MATRIX;
+                motors_matrix->set_frame_class_and_type(frame_class, frame_type);
+                if (!motors_matrix->init((uint8_t)value)) {
+                    ::printf("ERROR: scripting frame init with %d motors failed\n", (int)value);
+                    exit(1);
+                }
+#else
+                ::printf("scripting_frame needs a build with scripting enabled\n");
+                exit(1);
+#endif
 
             } else if (strcmp(cmd,"swash") == 0) {
                 if (frame_class == AP_Motors::MOTOR_FRAME_HELI) {
@@ -174,6 +210,7 @@ void setup()
                     case AP_Motors::MOTOR_FRAME_QUAD:
                     case AP_Motors::MOTOR_FRAME_HEXA:
                     case AP_Motors::MOTOR_FRAME_OCTA:
+                    case AP_Motors::MOTOR_FRAME_OCTAQUAD:
                         motors_matrix = new AP_MotorsMatrix(400);
                         motors = motors_matrix;
                         break;

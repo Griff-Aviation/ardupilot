@@ -15,9 +15,15 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include "AP_MotorsMatrix.h"
+#if HAL_LOGGING_ENABLED
+#include <AP_Logger/AP_Logger.h>
+#endif
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
 extern const AP_HAL::HAL& hal;
+
+// MOT_OQ_BIAS is an ArduCopter feature; examples (build type unknown) keep it for testing
+#define AP_MOTORS_OQ_BIAS_VEHICLE (APM_BUILD_TYPE(APM_BUILD_ArduCopter) || APM_BUILD_TYPE(APM_BUILD_UNKNOWN))
 
 // init
 void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame_type)
@@ -25,6 +31,14 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
     // record requested frame class and type
     _active_frame_class = frame_class;
     _active_frame_type = frame_type;
+
+    // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot).
+    // Done for every frame class, so a switch to a scripting frame clears it
+    const float oq_bias = _oq_bias.get();
+    _oq_bias_supported = AP_MOTORS_OQ_BIAS_VEHICLE &&
+                         (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
+    const bool oq_bias_ok = isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f;
+    _oq_bias_active = (_oq_bias_supported && oq_bias_ok) ? oq_bias : 0.0f;
 
     if (frame_class == MOTOR_FRAME_SCRIPTING_MATRIX) {
         // if Scripting frame class, do nothing scripting must call its own dedicated init function
@@ -401,8 +415,106 @@ void AP_MotorsMatrix::output_armed_stabilizing()
     // compensation_gain can never be zero
     _throttle_out = throttle_thrust_best_plus_adj / compensation_gain;
 
-    // check for failed motor
+    // check for failed motor, on the outputs before any layer bias so that
+    // a deliberate bias is not mistaken for a motor imbalance. The check can
+    // clear _thrust_boost, so keep whether this cycle was allocated with it.
+    const bool thrust_boost_allocated = _thrust_boost;
     check_for_failed_motor(throttle_thrust_best_plus_adj);
+
+    apply_octaquad_bias(throttle_thrust_best_plus_adj, thrust_boost_allocated);
+}
+
+// pre-arm checks: an OctaQuad X frame refuses to arm while the stored
+// MOT_OQ_BIAS is not a number within -1..1. An invalid value read at boot is
+// not applied, so correcting it lets the vehicle arm without a reboot (the
+// corrected bias then takes effect at the next boot, like any change)
+bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
+{
+    if (!AP_MotorsMulticopter::arming_checks(buflen, buffer)) {
+        return false;
+    }
+    const float oq_bias = _oq_bias.get();
+    if (_oq_bias_supported && !(isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f)) {
+        hal.util->snprintf(buffer, buflen, "MOT_OQ_BIAS must be finite, -1..1");
+        return false;
+    }
+    return true;
+}
+
+#if HAL_LOGGING_ENABLED
+void AP_MotorsMatrix::Log_Write()
+{
+    AP_MotorsMulticopter::Log_Write();
+
+    if (is_zero(_oq_bias_active)) {
+        return;
+    }
+    // @LoggerMessage: OQBI
+    // @Description: OctaQuad upper/lower collective bias (MOT_OQ_BIAS)
+    // @Vehicles: Copter
+    // @Field: TimeUS: Time since system startup
+    // @Field: Req: Bias in use, as configured
+    // @Field: Eff: Bias actually applied: transfer divided by collective; less than Req when limited by motor range, 0 when suppressed
+    // @Field: Col: Collective the transfer was computed from
+    // @Field: Xfer: Collective command moved to motors 1-4 and taken from motors 5-8
+    AP::logger().WriteStreaming("OQBI", "TimeUS,Req,Eff,Col,Xfer", "s----", "F----", "Qffff",
+                                AP_HAL::micros64(),
+                                _oq_bias_active,
+                                is_positive(_oq_bias_collective) ? _oq_bias_transfer / _oq_bias_collective : 0.0f,
+                                _oq_bias_collective,
+                                _oq_bias_transfer);
+}
+#endif
+
+// move collective from one OctaQuad X motor layer to the other (MOT_OQ_BIAS)
+//   collective is the throttle the outputs were just allocated with.
+//   Motors 1-4 receive +transfer and motors 5-8 -transfer, with
+//   transfer = bias * collective reduced as needed to keep every motor within
+//   0..1. On this frame each layer's roll, pitch and yaw factors sum to zero,
+//   so the transfer leaves the allocated roll, pitch, yaw and average
+//   collective unchanged. No transfer outside full spool-up, or when this
+//   cycle's outputs were allocated with thrust boost or boost still has a
+//   share of the allocation.
+void AP_MotorsMatrix::apply_octaquad_bias(float collective, bool thrust_boost_allocated)
+{
+    _oq_bias_collective = collective;
+    _oq_bias_transfer = 0.0f;
+    if (is_zero(_oq_bias_active) || _spool_state != SpoolState::THROTTLE_UNLIMITED ||
+        thrust_boost_allocated || is_positive(_thrust_boost_ratio)) {
+        return;
+    }
+
+    // the transfer is only balanced (net zero) with all eight motors in use
+    for (uint8_t i = 0; i < 8; i++) {
+        if (!motor_enabled[i]) {
+            return;
+        }
+    }
+
+    // the transfer range that keeps every motor within 0..1
+    float lo = -1.0f;
+    float hi = 1.0f;
+    for (uint8_t i = 0; i < 8; i++) {
+        const float out = _thrust_rpyt_out[i];
+        if (i < 4) {
+            lo = MAX(lo, -out);
+            hi = MIN(hi, 1.0f - out);
+        } else {
+            lo = MAX(lo, out - 1.0f);
+            hi = MIN(hi, out);
+        }
+    }
+    const float requested = _oq_bias_active * collective;
+    if (!isfinite(requested) || !(lo <= 0.0f && hi >= 0.0f)) {
+        // the unbiased outputs are not all within range: leave them alone
+        return;
+    }
+    const float transfer = constrain_float(requested, lo, hi);
+
+    for (uint8_t i = 0; i < 8; i++) {
+        _thrust_rpyt_out[i] += (i < 4) ? transfer : -transfer;
+    }
+    _oq_bias_transfer = transfer;
 }
 
 // check for failed motor
