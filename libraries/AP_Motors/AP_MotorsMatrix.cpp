@@ -435,7 +435,7 @@ bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
     }
     const float oq_bias = _oq_bias.get();
     if (_oq_bias_supported && !(isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f)) {
-        hal.util->snprintf(buffer, buflen, "MOT_OQ_BIAS must be -1..1");
+        hal.util->snprintf(buffer, buflen, "MOT_OQ_BIAS must be finite, -1..1");
         return false;
     }
     return true;
