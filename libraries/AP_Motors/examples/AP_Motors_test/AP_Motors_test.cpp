@@ -105,6 +105,26 @@ void setup()
                     exit(1);
                 }
 
+            } else if (strcmp(cmd,"scripting_frame") == 0) {
+#if AP_SCRIPTING_ENABLED
+                // switch the current matrix to the scripting frame class without a restart, as a
+                // FRAME_CLASS change does, then finish its init expecting value motors. The
+                // motors already set up are kept, as no script removes them.
+                if (motors_matrix == nullptr) {
+                    ::printf("scripting_frame needs a matrix frame_class first\n");
+                    exit(1);
+                }
+                frame_class = AP_Motors::MOTOR_FRAME_SCRIPTING_MATRIX;
+                motors_matrix->set_frame_class_and_type(frame_class, frame_type);
+                if (!motors_matrix->init((uint8_t)value)) {
+                    ::printf("ERROR: scripting frame init with %d motors failed\n", (int)value);
+                    exit(1);
+                }
+#else
+                ::printf("scripting_frame needs a build with scripting enabled\n");
+                exit(1);
+#endif
+
             } else if (strcmp(cmd,"swash") == 0) {
                 if (frame_class == AP_Motors::MOTOR_FRAME_HELI) {
                     // This is a extremely complicated and unsafe way to get at the swash type parameter

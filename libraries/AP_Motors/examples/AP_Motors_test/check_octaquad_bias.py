@@ -8,6 +8,12 @@ Usage:
   AP_Motors_test s frame_class=4 oq_bias=0.2 > bias.csv
   check_octaquad_bias.py base.csv bias.csv 0.2
 
+A frame switched away from OctaQuad X must drop the bias. Switching the same
+motors to the scripting frame without a restart must match the unbiased
+sweep, checked as bias 0:
+  AP_Motors_test s frame_class=4 oq_bias=0.2 scripting_frame=8 > script.csv
+  check_octaquad_bias.py base.csv script.csv 0
+
 For every input row it checks that, compared with the unbiased row:
   - motors 1-4 moved by +d and motors 5-8 by -d (the same d for each),
   - d has the sign of the bias and is no larger than bias * collective,
