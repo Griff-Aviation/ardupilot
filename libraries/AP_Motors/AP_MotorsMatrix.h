@@ -165,7 +165,6 @@ protected:
 
     // OctaQuad X layer bias, cached from MOT_OQ_BIAS at init
     bool                _oq_bias_supported = false; // frame is OctaQuad X
-    bool                _oq_bias_config_ok = true;  // configured bias is finite and within -1..1
     float               _oq_bias_active = 0.0f;     // bias in use, 0 when unsupported or invalid
     float               _oq_bias_collective = 0.0f; // collective the last transfer was computed from
     float               _oq_bias_transfer = 0.0f;   // collective moved to motors 1-4 in the last output, 0 when suppressed

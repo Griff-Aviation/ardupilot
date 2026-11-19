@@ -40,8 +40,8 @@ void AP_MotorsMatrix::init(motor_frame_class frame_class, motor_frame_type frame
     // cache the layer bias: a change to MOT_OQ_BIAS takes effect at the next init (reboot)
     const float oq_bias = _oq_bias.get();
     _oq_bias_supported = (frame_class == MOTOR_FRAME_OCTAQUAD) && (frame_type == MOTOR_FRAME_TYPE_X);
-    _oq_bias_config_ok = !_oq_bias_supported || (isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f);
-    _oq_bias_active = (_oq_bias_supported && _oq_bias_config_ok) ? oq_bias : 0.0f;
+    const bool oq_bias_ok = isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f;
+    _oq_bias_active = (_oq_bias_supported && oq_bias_ok) ? oq_bias : 0.0f;
 
     // enable fast channels or instant pwm
     set_update_rate(_speed_hz);
@@ -419,17 +419,17 @@ void AP_MotorsMatrix::output_armed_stabilizing()
     apply_octaquad_bias(throttle_thrust_best_plus_adj, thrust_boost_allocated);
 }
 
-// pre-arm checks: an OctaQuad X frame refuses to arm with a MOT_OQ_BIAS that
-// is not a number within -1..1, whether it was set before boot (it is then
-// not applied) or changed since (it would be applied at the next boot)
+// pre-arm checks: an OctaQuad X frame refuses to arm while the stored
+// MOT_OQ_BIAS is not a number within -1..1. An invalid value read at boot is
+// not applied, so correcting it lets the vehicle arm without a reboot (the
+// corrected bias then takes effect at the next boot, like any change)
 bool AP_MotorsMatrix::arming_checks(size_t buflen, char *buffer) const
 {
     if (!AP_MotorsMulticopter::arming_checks(buflen, buffer)) {
         return false;
     }
     const float oq_bias = _oq_bias.get();
-    const bool stored_ok = !_oq_bias_supported || (isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f);
-    if (!_oq_bias_config_ok || !stored_ok) {
+    if (_oq_bias_supported && !(isfinite(oq_bias) && oq_bias >= -1.0f && oq_bias <= 1.0f)) {
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
         hal.util->snprintf(buffer, buflen, "Q_M_OQ_BIAS must be -1..1");
 #else
