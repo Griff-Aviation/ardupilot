@@ -451,6 +451,7 @@ void AP_MotorsMatrix::Log_Write()
     }
     // @LoggerMessage: OQBI
     // @Description: OctaQuad upper/lower collective bias (MOT_OQ_BIAS)
+    // @Vehicles: Copter
     // @Field: TimeUS: Time since system startup
     // @Field: Req: Bias in use, as configured
     // @Field: Eff: Bias actually applied: transfer divided by collective; less than Req when limited by motor range, 0 when suppressed
