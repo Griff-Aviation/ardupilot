@@ -55,6 +55,9 @@ void setup()
     // default to quad frame class, frame class can be changed by argument in parser below
     AP_Motors::motor_frame_class frame_class = AP_Motors::MOTOR_FRAME_QUAD;
 
+    // frame type the matrix frames are initialised with
+    const AP_Motors::motor_frame_type frame_type = AP_Motors::MOTOR_FRAME_TYPE_X;
+
     // Parse the command line arguments
     uint8_t argc;
     char * const *argv;
@@ -90,13 +93,15 @@ void setup()
                 thrust_boost = value > 0.0;
 
             } else if (strcmp(cmd,"oq_bias") == 0) {
-                // the bias only acts on OctaQuad X, the frame type this harness uses
-                if (frame_class == AP_Motors::MOTOR_FRAME_OCTAQUAD && motors_matrix != nullptr) {
-                    // the bias is read at init
+                // the bias only acts on OctaQuad X
+                if (frame_class == AP_Motors::MOTOR_FRAME_OCTAQUAD && frame_type == AP_Motors::MOTOR_FRAME_TYPE_X &&
+                    motors_matrix != nullptr) {
+                    // the bias is read at init: re-initialise with the same class and type
                     motors_matrix->set_oq_bias(value);
-                    motors->init(frame_class, AP_Motors::MOTOR_FRAME_TYPE_X);
+                    motors->init(frame_class, frame_type);
                 } else {
-                    ::printf("oq_bias needs frame_class=%d (OctaQuad), got %d\n", AP_Motors::MOTOR_FRAME_OCTAQUAD, frame_class);
+                    ::printf("oq_bias needs frame_class=%d (OctaQuad) and frame type X, got class %d type %d\n",
+                             AP_Motors::MOTOR_FRAME_OCTAQUAD, frame_class, frame_type);
                     exit(1);
                 }
 
